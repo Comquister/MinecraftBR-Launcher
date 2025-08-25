@@ -381,6 +381,8 @@ function Start-Launcher {
         try {
             Start-Process $pythonwExe -ArgumentList "-c", """exec(__import__('requests').get('https://raw.githubusercontent.com/Comquister/MinecraftBR-Launcher/refs/heads/main/minecraft.py').text)"""
             Show-Status "Launcher iniciado! Verifique a bandeja do sistema." "success"
+            Start-Sleep 3
+            Exit-PSSession
         } catch {
             Show-Status "Erro ao iniciar: $($_.Exception.Message)" "error"
         }
