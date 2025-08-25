@@ -79,7 +79,7 @@ def download_background(game_dir):
     bg_path = game_dir / "background.png"
     if not bg_path.exists():
         try:
-            response = requests.get("https://minecraftbr.com/image/background.png", timeout=10)
+            response = requests.get("https://github.com/Comquister/MinecraftBR-Launcher/blob/main/image/background.png?raw=true", timeout=10)
             if response.status_code == 200:
                 with open(bg_path, 'wb') as f:
                     f.write(response.content)
@@ -323,7 +323,7 @@ class MinecraftLauncher(QMainWindow):
         self.setWindowTitle(CONFIG['Title'])
         # Define ícone da janela# Baixa o ícone da URL
         try:
-            icon_url = "https://minecraftbr.com/favicon.ico"
+            icon_url = "https://raw.githubusercontent.com/Comquister/MinecraftBR-Launcher/refs/heads/main/image/favicon.ico"
             response = requests.get(icon_url, timeout=10)
             if response.status_code == 200:
                 pixmap = QPixmap()
@@ -417,7 +417,7 @@ class MinecraftLauncher(QMainWindow):
         self.logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Carrega logo da URL
-        logo_url = "https://minecraftbr.com/logo.png"
+        logo_url = "https://github.com/Comquister/MinecraftBR-Launcher/blob/main/logo.png?raw=true"
         try:
             response = requests.get(logo_url, timeout=10)
             if response.status_code == 200:
