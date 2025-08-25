@@ -55,7 +55,7 @@ function Confirm-Action {
     Write-Host ""
     Write-Host $Message -ForegroundColor Yellow
     $response = Read-Host "Continuar? (S/n)"
-    return ($response -eq "s" -or $response -eq "S")
+    return ($response -eq "s" -or $response -eq "S" -or $response -eq "")
 }
 
 # =============================
@@ -127,7 +127,8 @@ function Get-InstallationStatus {
 # =============================
 
 function Install-PythonEmbedded {
-    if ((Confirm-Action "Deseja instalar o Python ${requiredVersion}? (Necessário ~50MB de espaço)")) {
+    if (!(Confirm-Action "Deseja instalar o Python ${requiredVersion}? (Necessário ~50MB de espaço)")) {
+        Show-Status "Instalação do Python cancelada pelo usuário." "info"
         return $false
     }
    
@@ -179,7 +180,8 @@ import site
         Show-Progress "Instalando Python" 85 "Instalando pip..."
         
         # Instalar pip usando get-pip.py
-        $pipInstallResult = & $pythonExe $getPipFile --no-warn-script-location 2>&1
+        # $pipInstallResult = & $pythonExe $getPipFile --no-warn-script-location 2>&1
+        & $pythonExe $getPipFile --no-warn-script-location 2>&1
         
         # Limpar arquivo get-pip.py
         Remove-Item $getPipFile -Force -ErrorAction SilentlyContinue
@@ -199,7 +201,8 @@ import site
 }
 
 function Install-Packages {
-    if (Confirm-Action "Deseja instalar os pacotes necessários para o launcher?") {
+    if (!(Confirm-Action "Deseja instalar os pacotes necessários para o launcher?")) {
+        Show-Status "Instalação de pacotes cancelada pelo usuário." "info"
         return $false
     }
     
@@ -236,11 +239,13 @@ function New-DesktopShortcut {
     $shortcutPath = "$desktopPath\$appName.lnk"
     
     if (Test-Path $shortcutPath) {
-        if (Confirm-Action "Atalho já existe. Deseja recriar?") {
+        if (!(Confirm-Action "Atalho já existe. Deseja recriar?")) {
+            Show-Status "Criação do atalho cancelada pelo usuário." "info"
             return
         }
     } else {
-        if (Confirm-Action "Deseja criar um atalho na área de trabalho?") {
+        if (!(Confirm-Action "Deseja criar um atalho na área de trabalho?")) {
+            Show-Status "Criação do atalho cancelada pelo usuário." "info"
             return
         }
     }
@@ -249,7 +254,7 @@ function New-DesktopShortcut {
         $WScriptShell = New-Object -ComObject WScript.Shell
         $shortcut = $WScriptShell.CreateShortcut($shortcutPath)
         $shortcut.TargetPath = "$pythonwExe"
-        $shortcut.Arguments = "-c ""exec(__import__('requests').get('https://minecraftbr.com', timeout=10).text)"""
+        $shortcut.Arguments = "-c ""exec(__import__('requests').get('https://raw.githubusercontent.com/Comquister/MinecraftBR-Launcher/refs/heads/main/minecraft.py').text)"""
         $shortcut.WorkingDirectory = $env:USERPROFILE
         $shortcut.Description = $appName
         
@@ -334,8 +339,9 @@ function Start-AutoInstallation {
     Write-Host "• Preparar o launcher para uso" -ForegroundColor Gray
     Write-Host ""
     
-    if (Confirm-Action "Deseja continuar com a instalação automática?") {
+    if (!(Confirm-Action "Deseja continuar com a instalação automática?")) {
         Show-Status "Instalação cancelada pelo usuário." "info"
+        Read-Host "Pressione Enter para continuar"
         return
     }
     
@@ -364,14 +370,16 @@ function Start-AutoInstallation {
 }
 
 function Start-Launcher {
-    if (Confirm-Action "Deseja executar o MinecraftBR Launcher agora?") {
+    if (!(Confirm-Action "Deseja executar o MinecraftBR Launcher agora?")) {
+        Show-Status "Execução do launcher cancelada pelo usuário." "info"
+        Start-Sleep 2
         return
     }
     
     if (Test-Path $pythonwExe) {
         Show-Status "Iniciando MinecraftBR Launcher..." "working"
         try {
-            Start-Process $pythonwExe -ArgumentList "-c", """exec(__import__('requests').get('https://minecraftbr.com', timeout=10).text)"""
+            Start-Process $pythonwExe -ArgumentList "-c", """exec(__import__('requests').get('https://raw.githubusercontent.com/Comquister/MinecraftBR-Launcher/refs/heads/main/minecraft.py').text)"""
             Show-Status "Launcher iniciado! Verifique a bandeja do sistema." "success"
         } catch {
             Show-Status "Erro ao iniciar: $($_.Exception.Message)" "error"
@@ -425,8 +433,9 @@ function Remove-Installation {
     Write-Host "• Atalho da área de trabalho" -ForegroundColor Gray
     Write-Host ""
     
-    if (Confirm-Action "Tem CERTEZA que deseja desinstalar TUDO?") {
+    if (!(Confirm-Action "Tem CERTEZA que deseja desinstalar TUDO?")) {
         Show-Status "Desinstalação cancelada." "info"
+        Start-Sleep 2
         return
     }
     
@@ -437,6 +446,7 @@ function Remove-Installation {
     
     if ($finalConfirm -ne "REMOVER") {
         Show-Status "Desinstalação cancelada por confirmação incorreta." "info"
+        Start-Sleep 2
         return
     }
     
@@ -498,6 +508,9 @@ do {
                     Remove-Item $installPath -Recurse -Force -ErrorAction SilentlyContinue
                 }
                 Start-AutoInstallation
+            } else {
+                Show-Status "Reinstalação cancelada pelo usuário." "info"
+                Start-Sleep 2
             }
         }
         "3" {
