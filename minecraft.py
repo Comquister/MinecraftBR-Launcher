@@ -388,7 +388,7 @@ class MinecraftThread(QThread):
 class MinecraftLauncher(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.game_dir = Path.home() / ".minecraftbr"
+        self.game_dir = Path(os.getenv("APPDATA")) / ".minecraftbr"
         self.game_dir.mkdir(exist_ok=True)
         self.auth_session = None
         self.username = None
