@@ -11,6 +11,7 @@ import pickle
 import subprocess
 import zipfile
 import tempfile, psutil
+import platform
 from pathlib import Path
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QLabel, QPushButton, QRadioButton, 
@@ -24,6 +25,44 @@ from portablemc.auth import MicrosoftAuthSession
 from flask import Flask, request
 from urllib.parse import urlparse
 
+# FUNÇÕES GLOBAIS (fora das classes)
+def calculate_optimal_ram():
+    """Calcula a quantidade ótima de RAM baseada no sistema"""
+    total_ram_gb = psutil.virtual_memory().total / (1024**3)
+    
+    # Deixa pelo menos 2GB para o sistema
+    available_ram_gb = max(1, total_ram_gb - 2)
+    
+    # Limita baseado no sistema
+    if platform.machine().endswith('64'):
+        # Sistema 64-bit
+        optimal_ram_gb = min(available_ram_gb * 0.7, 8)  # Máximo 8GB
+    else:
+        # Sistema 32-bit
+        optimal_ram_gb = min(available_ram_gb * 0.5, 3)  # Máximo 3GB
+    
+    return max(1, int(optimal_ram_gb * 1024))  # Retorna em MB
+
+def diagnose_jvm_issues():
+    """Função para diagnosticar problemas JVM"""
+    print("=== DIAGNÓSTICO JVM ===")
+    
+    # Sistema
+    print(f"SO: {platform.system()} {platform.release()}")
+    print(f"Arquitetura: {platform.machine()}")
+    print(f"RAM Total: {psutil.virtual_memory().total / (1024**3):.1f} GB")
+    
+    # RAM configurada
+    ram_config = calculate_optimal_ram()
+    print(f"RAM configurada: {ram_config}M")
+    
+    # Verificações específicas
+    if platform.machine().endswith('64'):
+        print("✓ Sistema 64-bit - sem limitações de RAM")
+    else:
+        print("⚠ Sistema 32-bit - RAM limitada a 3GB")
+    
+    print("=" * 25)
 
 # Configurações
 CONFIG = {
@@ -31,7 +70,7 @@ CONFIG = {
     'MINECRAFT_VERSION': "1.21.8",
     'SERVER_HOST': "max.cnq.wtf",
     'SERVER_PORT': 10069,
-    'RAM_SIZE': str(max(2, min((psutil.virtual_memory().total / (1024**3)) / 2, 8)) * 1024) + "M",
+    'RAM_SIZE': f"{calculate_optimal_ram()}M",  # Usando função otimizada
     'CLIENT_ID': "708e91b5-99f8-4a1d-80ec-e746cbb24771",
     'EXTRAS_JSON_URL': "https://minecraftbr.com/extra/index.php",
     'EXTRAS_DOWNLOAD_URL': "https://minecraftbr.com/extra/download.php",
@@ -193,15 +232,55 @@ class MinecraftThread(QThread):
             
             env = version.install()
             
-            # Configuração JVM
-            jvm_executable = env.jvm_args[0]
-            custom_jvm_args = [
-                jvm_executable,
-                f"-Xmx{CONFIG['RAM_SIZE']}",
-                f"-Xms{CONFIG['RAM_SIZE']}",
-                "-XX:+UseG1GC"
+            # CORREÇÃO: Configuração JVM melhorada
+            self.status_update.emit("Configurando JVM...")
+            
+            # Verifica se é sistema 32-bit ou 64-bit
+            is_64bit = platform.machine().endswith('64')
+            
+            # Configuração de RAM mais segura
+            ram_mb = int(CONFIG['RAM_SIZE'].replace('M', ''))
+            if not is_64bit and ram_mb > 3072:  # Limita a 3GB em sistemas 32-bit
+                ram_mb = 3072
+                self.status_update.emit("Sistema 32-bit detectado, limitando RAM a 3GB...")
+            
+            ram_size = f"{ram_mb}M"
+            
+            # JVM args mais compatíveis
+            jvm_args = [
+                f"-Xmx{ram_size}",
+                f"-Xms{min(512, ram_mb)}M",  # Xms menor que Xmx
+                "-XX:+UseG1GC",
+                "-XX:+UnlockExperimentalVMOptions",
+                "-XX:G1NewSizePercent=20",
+                "-XX:G1ReservePercent=20",
+                "-XX:MaxGCPauseMillis=50",
+                "-XX:G1HeapRegionSize=32M",
+                "-Djava.awt.headless=false",  # Previne problemas de GUI
+                "-Dfile.encoding=UTF-8"  # Encoding correto
             ]
-            env.jvm_args = custom_jvm_args + env.jvm_args[1:]
+            
+            # Adiciona argumentos específicos para Windows
+            if os.name == 'nt':
+                jvm_args.extend([
+                    "-Dos.name=Windows 10",
+                    "-Dos.version=10.0"
+                ])
+            
+            # CORREÇÃO: Aplicação correta dos argumentos JVM
+            original_jvm_args = env.jvm_args.copy()
+            
+            # Mantém o executável Java original
+            java_executable = original_jvm_args[0] if original_jvm_args else "java"
+            
+            # Remove argumentos conflitantes dos originais
+            filtered_original_args = []
+            for arg in original_jvm_args[1:]:
+                if not any(arg.startswith(prefix) for prefix in ['-Xmx', '-Xms', '-XX:+UseG1GC']):
+                    filtered_original_args.append(arg)
+            
+            # Combina argumentos customizados com os originais filtrados
+            env.jvm_args = [java_executable] + jvm_args + filtered_original_args
             
             self.status_update.emit("Iniciando jogo...")
             self.progress_update.emit(100)
@@ -210,6 +289,10 @@ class MinecraftThread(QThread):
             env.run()
             
         except Exception as e:
+            # Log mais detalhado do erro
+            import traceback
+            error_msg = f"Erro JVM: {str(e)}\nDetalhes: {traceback.format_exc()}"
+            print(error_msg)  # Log para debug
             self.error_occurred.emit(str(e))
     
     def _sync_extras(self):
@@ -313,12 +396,12 @@ class MinecraftLauncher(QMainWindow):
         self.auth_thread = None
         self.minecraft_thread = None
         self._pending_auth_email = None
-        self.progress_timer = QTimer()  # NOVO
-        self.current_progress = 0       # NOVO
+        self.progress_timer = QTimer()
+        self.current_progress = 0
         
         self.init_ui()
         self.load_background()
-        
+
     def init_ui(self):
         self.setWindowTitle(CONFIG['Title'])
         # Define ícone da janela# Baixa o ícone da URL
@@ -580,7 +663,6 @@ class MinecraftLauncher(QMainWindow):
         # Reposiciona o botão config
         self.config_btn.move(self.width() - 60, 20)
 
-
     def update_play_button_progress(self, progress, text=""):
         if progress == 0:
             # Estado normal
@@ -645,11 +727,6 @@ class MinecraftLauncher(QMainWindow):
         except Exception as e:
             print(f"Erro ao carregar background customizado: {e}")
 
-
-
-        
-        # Fallback para gradiente padrão já definido no CSS
-
     def _setup_last_login(self):
         if not self.last_login_data:
             return
@@ -663,13 +740,11 @@ class MinecraftLauncher(QMainWindow):
                 self.username = username
                 self.user_display.setText(f"Offline: {username}")
                 self.user_display.setStyleSheet(self.user_display.styleSheet() + "color: #FFFFFF;")
-                # self.status_label.setText(f"Pronto para jogar como {username} (Offline)")
         elif login_type == 'microsoft':
             email = login_data.get('email', 'Email Microsoft')
             username = login_data.get('username', 'Usuário')
             self.user_display.setText(f"Microsoft: {username}")
             self.user_display.setStyleSheet(self.user_display.styleSheet() + "color: #FFFFFF;")
-            # self.status_label.setText(f"Pronto para reautenticar como {username}")
 
     def on_login_selection(self, button):
         button_id = self.login_group.id(button)
@@ -756,7 +831,7 @@ class MinecraftLauncher(QMainWindow):
         
         self.minecraft_thread = MinecraftThread(self.game_dir, self.auth_session, self.username)
         self.minecraft_thread.status_update.connect(self.status_label.setText)
-        self.minecraft_thread.progress_update.connect(self.on_progress_update)  # MUDANÇA AQUI
+        self.minecraft_thread.progress_update.connect(self.on_progress_update)
         self.minecraft_thread.error_occurred.connect(self._on_minecraft_error)
         self.minecraft_thread.finished_success.connect(self.close)
         self.minecraft_thread.start()
@@ -766,6 +841,7 @@ class MinecraftLauncher(QMainWindow):
         self.update_play_button_progress(0)  # Reseta o botão
         self.status_label.setText(f"Erro na autenticação: {error}")
         QMessageBox.critical(self, "Erro", f"Erro no login: {error}")
+
     def on_play(self):
         # Verifica se precisa fazer login primeiro
         selected_button = self.login_group.checkedButton()
@@ -805,7 +881,7 @@ class MinecraftLauncher(QMainWindow):
         
         self.minecraft_thread = MinecraftThread(self.game_dir, self.auth_session, self.username)
         self.minecraft_thread.status_update.connect(self.status_label.setText)
-        self.minecraft_thread.progress_update.connect(self.on_progress_update)  # MUDANÇA AQUI
+        self.minecraft_thread.progress_update.connect(self.on_progress_update)
         self.minecraft_thread.error_occurred.connect(self._on_minecraft_error)
         self.minecraft_thread.finished_success.connect(self.close)
         self.minecraft_thread.start()
@@ -814,7 +890,6 @@ class MinecraftLauncher(QMainWindow):
         self.current_progress = progress
         self.update_play_button_progress(progress)
 
-    # Modifique o método _on_minecraft_error():
     def _on_minecraft_error(self, error):
         self.status_label.setText("Erro ao iniciar")
         self.update_play_button_progress(0)  # Reseta o botão
@@ -845,6 +920,9 @@ Deseja abrir o diretório do jogo?"""
                 QMessageBox.critical(self, "Erro", f"Erro ao abrir diretório: {e}")
 
 def main():
+    # Para debug - descomente a linha abaixo se precisar diagnosticar
+    # diagnose_jvm_issues()
+    
     app = QApplication(sys.argv)
     app.setApplicationName("MinecraftBr Launcher")
     
