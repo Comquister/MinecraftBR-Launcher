@@ -21,9 +21,11 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QPixmap, QPalette, QBrush, QIcon
 from portablemc.standard import Version, Context
 from portablemc.fabric import FabricVersion
+from portablemc.forge import ForgeVersion, _NeoForgeVersion
 from portablemc.auth import MicrosoftAuthSession
 from flask import Flask, request
 from urllib.parse import urlparse
+import shutil
 
 # FUNÇÕES GLOBAIS (fora das classes)
 def calculate_optimal_ram():
@@ -42,6 +44,17 @@ def calculate_optimal_ram():
         optimal_ram_gb = min(available_ram_gb * 0.5, 3)  # Máximo 3GB
     
     return max(1, int(optimal_ram_gb * 1024))  # Retorna em MB
+
+def calculate_sha256(file_path):
+    """Calcula SHA256 de um arquivo"""
+    sha256_hash = hashlib.sha256()
+    try:
+        with open(file_path, "rb") as f:
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        return f"sha256:{sha256_hash.hexdigest()}"
+    except Exception:
+        return None
 
 def diagnose_jvm_issues():
     """Função para diagnosticar problemas JVM"""
@@ -64,17 +77,17 @@ def diagnose_jvm_issues():
     
     print("=" * 25)
 
-# Configurações
+releasesgithub = requests.get("https://api.github.com/repos/Comquister/MinecraftBR-Launcher/releases/latest").json()["assets"]
 CONFIG = {
     'Title': 'MinecraftBr Launcher',
-    'MINECRAFT_VERSION': "1.21.8",
-    'SERVER_HOST': "max.cnq.wtf",
-    'SERVER_PORT': 10069,
-    'RAM_SIZE': f"{calculate_optimal_ram()}M",  # Usando função otimizada
+    'RAM_SIZE': f"{calculate_optimal_ram()}M",
     'CLIENT_ID': "708e91b5-99f8-4a1d-80ec-e746cbb24771",
-    'EXTRAS_JSON_URL': "https://minecraftbr.com/extra/index.php",
-    'EXTRAS_DOWNLOAD_URL': "https://minecraftbr.com/extra/download.php",
-    'IGNORE_FILE': "?ignorar=!mods",
+    
+    # Configuração do Modpack
+    'MRPACK_URL': str(next(a["browser_download_url"] for a in releasesgithub if a["name"].endswith(".mrpack"))),
+    'MRPACK_HASH': str(next(a["digest"] for a in releasesgithub if a["name"].endswith(".mrpack")))
+,
+    
     'PORTWEB': random.randint(49152, 65535)
 }
 CONFIG['REDIRECT_URI'] = f"http://localhost:{CONFIG['PORTWEB']}/code"
@@ -82,16 +95,6 @@ CONFIG['REDIRECT_URI'] = f"http://localhost:{CONFIG['PORTWEB']}/code"
 auth_data = {'success': None, 'code': None, 'id_token': None}
 
 # Funções utilitárias
-def calculate_sha256(file_path):
-    sha256_hash = hashlib.sha256()
-    try:
-        with open(file_path, "rb") as f:
-            for byte_block in iter(lambda: f.read(4096), b""):
-                sha256_hash.update(byte_block)
-        return sha256_hash.hexdigest()
-    except Exception:
-        return None
-
 def save_login_data(game_dir, login_type, data):
     login_file = game_dir / "last_login.dat"
     try:
@@ -207,19 +210,41 @@ class MinecraftThread(QThread):
         self.auth_session = auth_session
         self.username = username
         self.context = Context(game_dir, game_dir)
+        self.mrpack_data = None
     
     def run(self):
         try:
             self.game_dir.mkdir(exist_ok=True)
             
-            # Sincroniza arquivos extras
-            self.status_update.emit("Verificando arquivos extras...")
-            self.progress_update.emit(10)
-            self._sync_extras()
+            # Sincroniza o modpack
+            self.status_update.emit("Verificando modpack...")
+            self.progress_update.emit(5)
             
-            self.status_update.emit("Preparando Minecraft...")
-            self.progress_update.emit(55)
-            version = FabricVersion.with_fabric(CONFIG['MINECRAFT_VERSION'], context=self.context)
+            if not self._sync_mrpack():
+                self.error_occurred.emit("Erro ao sincronizar modpack")
+                return
+            
+            # Obtém versões do modpack
+            minecraft_version = self._get_minecraft_version_from_mrpack()
+            modloader_info = self._get_modloader_from_mrpack()
+            
+            if not minecraft_version:
+                self.error_occurred.emit("Versão do Minecraft não encontrada no modpack")
+                return
+            
+            self.status_update.emit(f"Preparando {minecraft_version} com {modloader_info['name']}...")
+            self.progress_update.emit(60)
+            
+            # Instancia a versão correta baseada no modloader
+            if modloader_info['name'] == 'fabric-loader':
+                version = FabricVersion.with_fabric(minecraft_version, modloader_info['version'], context=self.context)
+            elif modloader_info['name'] == 'forge':
+                version = ForgeVersion(f"{minecraft_version}-{modloader_info['version']}", context=self.context)
+            elif modloader_info['name'] == 'neoforge':
+                version = _NeoForgeVersion(modloader_info['version'], context=self.context)
+            else:
+                # Fallback para Vanilla
+                version = Version(minecraft_version, context=self.context)
             
             # Autenticação
             if self.auth_session:
@@ -228,7 +253,7 @@ class MinecraftThread(QThread):
                 version.set_auth_offline(self.username, None)
             
             self.status_update.emit("Instalando componentes...")
-            self.progress_update.emit(70)
+            self.progress_update.emit(75)
             
             env = version.install()
             
@@ -291,99 +316,248 @@ class MinecraftThread(QThread):
         except Exception as e:
             # Log mais detalhado do erro
             import traceback
-            error_msg = f"Erro JVM: {str(e)}\nDetalhes: {traceback.format_exc()}"
+            error_msg = f"Erro: {str(e)}\nDetalhes: {traceback.format_exc()}"
             print(error_msg)  # Log para debug
             self.error_occurred.emit(str(e))
     
-    def _sync_extras(self):
+    def _sync_mrpack(self):
+        """Sincroniza o arquivo .mrpack e extrai seus conteúdos"""
         try:
-            # Obtém lista de arquivos do servidor
-            if check_last(self.game_dir):
-                response = requests.get(CONFIG['EXTRAS_JSON_URL'] + CONFIG['IGNORE_FILE'], timeout=10)
-            else:
-                response = requests.get(CONFIG['EXTRAS_JSON_URL'], timeout=10)
-            
-            if response.status_code != 200:
-                return True
-                
-            remote_files = response.json()
-            if not remote_files:
-                return True
+            mrpack_path = self.game_dir / "modpack.zip"
+            mrpack_hash_path = self.game_dir / "modpack.zip.sha256"
             
             # Verifica se precisa baixar
-            needs_download = self._check_files_need_update(remote_files)
+            needs_download = True
+            
+            if mrpack_path.exists():
+                if CONFIG.get('MRPACK_HASH'):
+                    # Verifica hash remoto
+                    try:
+                        remote_hash = CONFIG['MRPACK_HASH']
+                        local_hash = calculate_sha256(mrpack_path)
+                        if local_hash and local_hash == remote_hash:
+                            needs_download = False
+                    except Exception as e:
+                        print(f"Erro ao verificar hash remoto: {e}")
+                else:
+                    # Verifica Last-Modified
+                    try:
+                        response = requests.head(CONFIG['MRPACK_URL'], timeout=10)
+                        if response.status_code == 200:
+                            remote_modified = response.headers.get('Last-Modified')
+                            if remote_modified and mrpack_hash_path.exists():
+                                with open(mrpack_hash_path, 'r') as f:
+                                    local_modified = f.read().strip()
+                                if local_modified == remote_modified:
+                                    needs_download = False
+                    except Exception as e:
+                        print(f"Erro ao verificar Last-Modified: {e}")
             
             if needs_download:
-                self._download_and_extract_zip()
+                self.status_update.emit("Baixando modpack...")
+                self.progress_update.emit(10)
                 
-            return True
+                # Baixa o arquivo .mrpack
+                response = requests.get(CONFIG['MRPACK_URL'], stream=True, timeout=120)
+                response.raise_for_status()
+                
+                total_size = int(response.headers.get('content-length', 0))
+                downloaded = 0
+                
+                with open(mrpack_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if total_size > 0:
+                                progress = 10 + int((downloaded / total_size) * 20)
+                                self.progress_update.emit(progress)
+                
+                # Salva informações de cache
+                if CONFIG.get('MRPACK_HASH_URL'):
+                    hash_value = calculate_sha256(mrpack_path)
+                    if hash_value:
+                        with open(mrpack_hash_path, 'w') as f:
+                            f.write(hash_value)
+                else:
+                    last_modified = response.headers.get('Last-Modified', '')
+                    with open(mrpack_hash_path, 'w') as f:
+                        f.write(last_modified)
+            
+            self.status_update.emit("Extraindo modpack...")
+            self.progress_update.emit(35)
+            
+            # Extrai e processa o .mrpack
+            return self._extract_mrpack(mrpack_path)
             
         except Exception as e:
-            print(f"Erro na sincronização: {e}")
-            return True
+            print(f"Erro na sincronização do mrpack: {e}")
+            return False
     
-    def _check_files_need_update(self, remote_files):
-        local_files = self._get_local_files()
-        
-        for file_info in remote_files:
-            file_name = file_info['nome']
-            expected_hash = file_info['hash']
-            
-            if file_name not in local_files:
-                return True
-            elif local_files[file_name]['hash'] != expected_hash:
-                return True
-        
-        return False
-    
-    def _get_local_files(self):
-        local_files = {}
-        for item in self.game_dir.rglob('*'):
-            if item.is_file() and not item.name.startswith(('last_login', 'icon', 'background')):
-                relative_path = str(item.relative_to(self.game_dir)).replace(os.sep, '/')
-                if not relative_path.startswith('./'):
-                    relative_path = './' + relative_path
-                hash_value = calculate_sha256(item)
-                if hash_value:
-                    local_files[relative_path] = {'hash': hash_value, 'path': item}
-        return local_files
-    
-    def _download_and_extract_zip(self):
+    def _extract_mrpack(self, mrpack_path):
+        """Extrai o arquivo .mrpack e processa seus conteúdos"""
         try:
-            self.status_update.emit("Baixando arquivos extras...")
-            self.progress_update.emit(25)
+            temp_dir = self.game_dir / "temp_mrpack"
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir)
+            temp_dir.mkdir()
+            with zipfile.ZipFile(mrpack_path, 'r') as zip_ref:
+                zip_ref.extractall(temp_dir)
+            index_path = temp_dir / "modrinth.index.json"
+            if not index_path.exists():
+                raise Exception("modrinth.index.json não encontrado no modpack")
+            with open(index_path, 'r', encoding='utf-8') as f:
+                self.mrpack_data = json.load(f)
+            files = self.mrpack_data.get('files', [])
+            mods_dir = self.game_dir / "mods"
+            mods_dir.mkdir(exist_ok=True)
             
-            # Baixa o ZIP
-            if check_last(self.game_dir):
-                response = requests.get(CONFIG['EXTRAS_DOWNLOAD_URL'] + CONFIG['IGNORE_FILE'], stream=True, timeout=120)
-            else:
-                response = requests.get(CONFIG['EXTRAS_DOWNLOAD_URL'], stream=True, timeout=120)
-            response.raise_for_status()
+            # LIMPEZA: Remove mods antigos
+            self.status_update.emit("Limpando mods antigos...")
+            self.progress_update.emit(35)
+            self._clean_old_mods(mods_dir, files)
             
-            # Salva em arquivo temporário
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as temp_zip:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        temp_zip.write(chunk)
-                temp_zip_path = temp_zip.name
+            self.status_update.emit("Baixando mods...")
+            self.progress_update.emit(40)
             
-            self.status_update.emit("Extraindo arquivos...")
-            self.progress_update.emit(45)
+            total_files = len(files)
+            for i, file_info in enumerate(files):
+                if not self._download_mod_file(file_info, self.game_dir):
+                    print(f"Falha ao baixar: {file_info.get('path', 'arquivo desconhecido')}")
+                progress = 40 + int((i + 1) / total_files * 15)
+                self.progress_update.emit(progress)
             
-            # Extrai o ZIP
-            with zipfile.ZipFile(temp_zip_path, 'r') as zip_ref:
-                zip_ref.extractall(self.game_dir)
+            self.status_update.emit("Aplicando overrides...")
+            self.progress_update.emit(55)
+            self._apply_overrides(temp_dir)
+            shutil.rmtree(temp_dir)
+            return True
+        except Exception as e:
+            print(f"Erro na extração do mrpack: {e}")
+            return False
+
+    def _download_mod_file(self, file_info, base_dir):
+        """Baixa um arquivo de mod individual"""
+        try:
+            file_path = Path(file_info['path'])
+            full_path = base_dir / file_path
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            expected_sha256 = file_info.get('hashes', {}).get('sha256')
+            if full_path.exists() and expected_sha256:
+                current_hash = calculate_sha256(full_path)
+                if current_hash == expected_sha256:
+                    return True
+            downloads = file_info.get('downloads', [])
+            if not downloads:
+                print(f"Nenhuma URL de download para {file_path}")
+                return False
+            for download_url in downloads:
+                try:
+                    response = requests.get(download_url, timeout=60)
+                    response.raise_for_status()
+                    with open(full_path, 'wb') as f:
+                        f.write(response.content)
+                    if expected_sha256:
+                        downloaded_hash = calculate_sha256(full_path)
+                        if downloaded_hash != expected_sha256:
+                            print(f"Hash incorreto para {file_path}")
+                            full_path.unlink()
+                            continue
+                    return True
+                except Exception as e:
+                    print(f"Erro ao baixar {download_url}: {e}")
+                    if full_path.exists():
+                        full_path.unlink()
+                    continue
+            return False
+        except Exception as e:
+            print(f"Erro no download do arquivo {file_info.get('path', 'desconhecido')}: {e}")
+            return False
+    def _clean_old_mods(self, mods_dir, valid_files):
+        """Remove mods que não estão no modpack atual"""
+        try:
+            if not mods_dir.exists():
+                return
+            valid_paths = set()
+            for file_info in valid_files:
+                file_path = file_info['path']
+                if file_path.startswith('mods/'):
+                    mod_path = Path(file_path[5:])
+                    valid_paths.add(mod_path)
+            for existing_file in mods_dir.rglob('*'):
+                if existing_file.is_file():
+                    relative_path = existing_file.relative_to(mods_dir)
+                    if relative_path not in valid_paths:
+                        existing_file.unlink()
+                        print(f"Removido: {relative_path}")
+        except Exception as e:
+            print(f"Erro ao limpar mods antigos: {e}")
+    def _apply_overrides(self, temp_dir):
+        """Aplica os arquivos de override do modpack"""
+        try:
+            # Verifica diferentes tipos de override
+            override_dirs = ['overrides', 'client-overrides']
             
-            # Remove arquivo temporário
-            os.unlink(temp_zip_path)
+            for override_name in override_dirs:
+                override_path = temp_dir / override_name
+                if override_path.exists() and override_path.is_dir():
+                    # Copia todos os arquivos para o diretório do jogo
+                    for item in override_path.rglob('*'):
+                        if item.is_file():
+                            relative_path = item.relative_to(override_path)
+                            target_path = self.game_dir / relative_path
+                            
+                            # Cria diretórios pais se necessário
+                            target_path.parent.mkdir(parents=True, exist_ok=True)
+                            
+                            # Copia o arquivo
+                            shutil.copy2(item, target_path)
+                            
+        except Exception as e:
+            print(f"Erro ao aplicar overrides: {e}")
+    
+    def _get_minecraft_version_from_mrpack(self):
+        """Obtém a versão do Minecraft do arquivo mrpack"""
+        try:
+            if not self.mrpack_data:
+                return None
+                
+            dependencies = self.mrpack_data.get('dependencies', {})
+            return dependencies.get('minecraft')
             
         except Exception as e:
-            print(f"Erro no download/extração: {e}")
-            if 'temp_zip_path' in locals():
-                try:
-                    os.unlink(temp_zip_path)
-                except:
-                    pass
+            print(f"Erro ao obter versão do Minecraft: {e}")
+            return None
+    
+    def _get_modloader_from_mrpack(self):
+        """Obtém informações do modloader do arquivo mrpack"""
+        try:
+            if not self.mrpack_data:
+                return {'name': 'vanilla', 'version': None}
+                
+            dependencies = self.mrpack_data.get('dependencies', {})
+            
+            # Verifica diferentes modloaders em ordem de prioridade
+            modloaders = [
+                ('fabric-loader', 'fabric-loader'),
+                ('forge', 'forge'),
+                ('neoforge', 'neoforge'),
+                ('quilt-loader', 'quilt-loader')
+            ]
+            
+            for key, name in modloaders:
+                if key in dependencies:
+                    return {
+                        'name': name,
+                        'version': dependencies[key]
+                    }
+            
+            # Fallback para vanilla
+            return {'name': 'vanilla', 'version': None}
+            
+        except Exception as e:
+            print(f"Erro ao obter modloader: {e}")
+            return {'name': 'vanilla', 'version': None}
 
 class MinecraftLauncher(QMainWindow):
     def __init__(self):
@@ -500,7 +674,7 @@ class MinecraftLauncher(QMainWindow):
         self.logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Carrega logo da URL
-        logo_url = "https://github.com/Comquister/MinecraftBR-Launcher/blob/main/logo.png?raw=true"
+        logo_url = "https://github.com/Comquister/MinecraftBR-Launcher/blob/main/image/logo.png?raw=true"
         try:
             response = requests.get(logo_url, timeout=10)
             if response.status_code == 200:
@@ -642,6 +816,7 @@ class MinecraftLauncher(QMainWindow):
                 color: #CCCCCC;
             }
         """)
+        about_btn.clicked.connect(self.on_about)
         status_layout.addWidget(about_btn)
         
         container_layout.addLayout(status_layout)
@@ -902,7 +1077,7 @@ class MinecraftLauncher(QMainWindow):
         info = f"""Configurações:
 
 📁 Diretório: {game_dir_str}
-🎮 Versão: {CONFIG['MINECRAFT_VERSION']}
+📦 Modpack: {CONFIG['MRPACK_URL']}
 💾 RAM: {CONFIG['RAM_SIZE']}
 
 Deseja abrir o diretório do jogo?"""
@@ -918,6 +1093,18 @@ Deseja abrir o diretório do jogo?"""
                     subprocess.run(['xdg-open', game_dir_str])
             except Exception as e:
                 QMessageBox.critical(self, "Erro", f"Erro ao abrir diretório: {e}")
+
+    def on_about(self):
+        about_text = f"""
+{CONFIG['Title']}
+
+🎮 Launcher personalizado para Minecraft
+📦 Sistema de modpacks .mrpack
+💾 RAM otimizada: {CONFIG['RAM_SIZE']}
+
+Desenvolvido para a comunidade MinecraftBR
+        """
+        QMessageBox.about(self, "Sobre", about_text.strip())
 
 def main():
     # Para debug - descomente a linha abaixo se precisar diagnosticar
