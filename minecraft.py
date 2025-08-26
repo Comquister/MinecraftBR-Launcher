@@ -1,17 +1,4 @@
-import sys
-import os
-import threading
-import time
-import webbrowser
-import requests
-import json
-import hashlib
-import random
-import pickle
-import subprocess
-import zipfile
-import tempfile, psutil
-import platform
+import sys, platform, tempfile, psutil, zipfile, subprocess, json, hashlib, random, pickle, webbrowser, requests, time, threading, os
 from pathlib import Path
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QLabel, QPushButton, QRadioButton, 
