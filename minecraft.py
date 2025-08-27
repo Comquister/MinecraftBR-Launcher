@@ -316,29 +316,18 @@ class MinecraftThread(QThread):
             # Verifica se precisa baixar
             needs_download = True
             
-            if mrpack_path.exists():
-                if CONFIG.get('MRPACK_HASH'):
-                    # Verifica hash remoto
-                    try:
-                        remote_hash = CONFIG['MRPACK_HASH']
-                        local_hash = calculate_sha256(mrpack_path)
-                        if local_hash and local_hash == remote_hash:
-                            needs_download = False
-                    except Exception as e:
-                        print(f"Erro ao verificar hash remoto: {e}")
-                else:
-                    # Verifica Last-Modified
-                    try:
-                        response = requests.head(CONFIG['MRPACK_URL'], timeout=10)
-                        if response.status_code == 200:
-                            remote_modified = response.headers.get('Last-Modified')
-                            if remote_modified and mrpack_hash_path.exists():
-                                with open(mrpack_hash_path, 'r') as f:
-                                    local_modified = f.read().strip()
-                                if local_modified == remote_modified:
-                                    needs_download = False
-                    except Exception as e:
-                        print(f"Erro ao verificar Last-Modified: {e}")
+            if mrpack_path.exists() and CONFIG.get('MRPACK_HASH'):
+                # Compara hash local com hash remoto do GitHub
+                try:
+                    remote_hash = CONFIG['MRPACK_HASH']
+                    local_hash = calculate_sha256(mrpack_path)
+                    if local_hash and local_hash == remote_hash:
+                        needs_download = False
+                        print(f"Hash local coincide com remoto: {local_hash}")
+                    else:
+                        print(f"Hash local ({local_hash}) != Hash remoto ({remote_hash})")
+                except Exception as e:
+                    print(f"Erro ao verificar hash: {e}")
             
             if needs_download:
                 self.status_update.emit("Baixando modpack...")
@@ -360,16 +349,18 @@ class MinecraftThread(QThread):
                                 progress = 10 + int((downloaded / total_size) * 20)
                                 self.progress_update.emit(progress)
                 
-                # Salva informações de cache
-                if CONFIG.get('MRPACK_HASH_URL'):
-                    hash_value = calculate_sha256(mrpack_path)
-                    if hash_value:
-                        with open(mrpack_hash_path, 'w') as f:
-                            f.write(hash_value)
-                else:
-                    last_modified = response.headers.get('Last-Modified', '')
+                # Sempre calcula e salva o hash do arquivo baixado
+                hash_value = calculate_sha256(mrpack_path)
+                if hash_value:
                     with open(mrpack_hash_path, 'w') as f:
-                        f.write(last_modified)
+                        f.write(hash_value)
+                    print(f"Hash calculado e salvo: {hash_value}")
+                
+                # Verifica se o hash do arquivo baixado coincide com o esperado
+                if CONFIG.get('MRPACK_HASH') and hash_value != CONFIG['MRPACK_HASH']:
+                    print(f"AVISO: Hash do arquivo baixado ({hash_value}) não coincide com esperado ({CONFIG['MRPACK_HASH']})")
+            else:
+                print("Arquivo já está atualizado, pulando download")
             
             self.status_update.emit("Extraindo modpack...")
             self.progress_update.emit(35)
@@ -380,7 +371,7 @@ class MinecraftThread(QThread):
         except Exception as e:
             print(f"Erro na sincronização do mrpack: {e}")
             return False
-    
+
     def _extract_mrpack(self, mrpack_path):
         """Extrai o arquivo .mrpack e processa seus conteúdos"""
         try:

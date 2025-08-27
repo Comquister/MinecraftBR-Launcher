@@ -63,7 +63,7 @@ if ($hashExistente -and $hashExistente -eq $hashBaixado) {
     Write-Host "O arquivo baixado é idêntico ao existente. Nenhuma atualização necessária."
 } else {
     Write-Host "Arquivo atualizado ou novo. Preparando para executar..."
-    # Executa o arquivo
-    Start-Process -FilePath $caminhoCompleto -WorkingDirectory $pastaDestino
-    Write-Host "Arquivo executado com sucesso."
 }
+
+Start-Process -FilePath $caminhoCompleto -WorkingDirectory $pastaDestino
+Write-Host "Arquivo executado com sucesso."
