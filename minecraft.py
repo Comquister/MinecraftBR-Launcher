@@ -1,17 +1,15 @@
-import sys, platform, tempfile, psutil, zipfile, subprocess, json, hashlib, random, pickle, webbrowser, requests, time, threading, os
+import sys, platform, psutil, zipfile, subprocess, json, hashlib, random, concurrent.futures, pickle, webbrowser, requests, time, threading, os
 from pathlib import Path
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QLabel, QPushButton, QRadioButton, 
-                            QButtonGroup, QProgressBar, QInputDialog, QMessageBox,
-                            QTextEdit)
+                            QButtonGroup, QInputDialog, QMessageBox)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QPixmap, QPalette, QBrush, QIcon
+from PyQt6.QtGui import QPixmap, QPalette, QBrush, QIcon
 from portablemc.standard import Version, Context
 from portablemc.fabric import FabricVersion
 from portablemc.forge import ForgeVersion, _NeoForgeVersion
 from portablemc.auth import MicrosoftAuthSession
 from flask import Flask, request
-from urllib.parse import urlparse
 import shutil
 
 # FUNÇÕES GLOBAIS (fora das classes)
@@ -142,6 +140,218 @@ h1{color:#4cafef}p{color:#bbb}</style></head>
 <script>setTimeout(()=>window.close(),3000)</script></body></html>"""
     
     return app
+
+class ModDownloader:
+    def __init__(self, game_dir, progress_callback=None):
+        self.game_dir = game_dir
+        self.progress_callback = progress_callback
+        self.download_stats = {
+            'total': 0,
+            'completed': 0,
+            'failed': 0,
+            'skipped': 0
+        }
+        self.stats_lock = threading.Lock()
+    
+    def _update_progress(self):
+        """Atualiza o progresso do download"""
+        with self.stats_lock:
+            total = self.download_stats['total']
+            completed = self.download_stats['completed'] + self.download_stats['failed'] + self.download_stats['skipped']
+            
+            if total > 0 and self.progress_callback:
+                progress = int((completed / total) * 100)
+                self.progress_callback(40 + int(progress * 0.15))  # 40% base + 15% para downloads
+    
+    def _download_single_mod(self, file_info):
+        """Download de um único mod com retry automático"""
+        try:
+            file_path = Path(file_info['path'])
+            full_path = self.game_dir / file_path
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            expected_sha256 = file_info.get('hashes', {}).get('sha256')
+            
+            # Verifica se já existe e está correto
+            if full_path.exists() and expected_sha256:
+                current_hash = calculate_sha256(full_path)
+                if current_hash == expected_sha256:
+                    with self.stats_lock:
+                        self.download_stats['skipped'] += 1
+                    self._update_progress()
+                    return {'status': 'skipped', 'file': str(file_path)}
+            
+            downloads = file_info.get('downloads', [])
+            if not downloads:
+                with self.stats_lock:
+                    self.download_stats['failed'] += 1
+                self._update_progress()
+                return {'status': 'failed', 'file': str(file_path), 'error': 'No download URLs'}
+            
+            # Tenta download de cada URL até conseguir
+            for attempt, download_url in enumerate(downloads):
+                try:
+                    # Timeout baseado no tamanho estimado (máximo 300s)
+                    timeout = min(120, max(30, file_info.get('fileSize', 1000000) // 100000))
+                    
+                    response = requests.get(
+                        download_url, 
+                        timeout=timeout,
+                        stream=True,
+                        headers={'User-Agent': 'MinecraftBR-Launcher/1.0'}
+                    )
+                    response.raise_for_status()
+                    
+                    # Download com verificação de tamanho
+                    total_size = int(response.headers.get('content-length', 0))
+                    downloaded = 0
+                    
+                    with open(full_path, 'wb') as f:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+                                downloaded += len(chunk)
+                    
+                    # Verifica integridade se possível
+                    if expected_sha256:
+                        downloaded_hash = calculate_sha256(full_path)
+                        if downloaded_hash != expected_sha256:
+                            full_path.unlink()
+                            if attempt == len(downloads) - 1:  # Última tentativa
+                                raise Exception(f"Hash incorreto: esperado {expected_sha256}, obtido {downloaded_hash}")
+                            continue  # Tenta próxima URL
+                    
+                    with self.stats_lock:
+                        self.download_stats['completed'] += 1
+                    self._update_progress()
+                    return {'status': 'success', 'file': str(file_path)}
+                    
+                except Exception as e:
+                    if full_path.exists():
+                        full_path.unlink()
+                    
+                    if attempt == len(downloads) - 1:  # Última tentativa
+                        with self.stats_lock:
+                            self.download_stats['failed'] += 1
+                        self._update_progress()
+                        return {'status': 'failed', 'file': str(file_path), 'error': str(e)}
+                    # Continua para próxima URL
+            
+        except Exception as e:
+            with self.stats_lock:
+                self.download_stats['failed'] += 1
+            self._update_progress()
+            return {'status': 'failed', 'file': file_info.get('path', 'unknown'), 'error': str(e)}
+
+    def download_mods_parallel(self, files_list, max_workers=None):
+        """
+        Download paralelo de mods
+        max_workers: Número de threads. Se None, usa núcleos do CPU * 2
+        """
+        if not files_list:
+            return {'success': True, 'results': []}
+        
+        # Calcula workers baseado nos núcleos do CPU
+        if max_workers is None:
+            cpu_count = psutil.cpu_count(logical=False) or 4  # Núcleos físicos
+            max_workers = min(cpu_count * 2, 8)  # Máximo 8 para não sobrecarregar
+        
+        # Separa mods que precisam de download dos que podem ser pulados
+        files_to_process = []
+        for file_info in files_list:
+            file_path = Path(file_info['path'])
+            full_path = self.game_dir / file_path
+            expected_sha256 = file_info.get('hashes', {}).get('sha256')
+            
+            # Verifica se precisa baixar
+            needs_download = True
+            if full_path.exists() and expected_sha256:
+                current_hash = calculate_sha256(full_path)
+                if current_hash == expected_sha256:
+                    needs_download = False
+            
+            if needs_download:
+                files_to_process.append(file_info)
+        
+        print(f"Iniciando download paralelo: {len(files_to_process)} arquivos com {max_workers} workers")
+        
+        # Inicializa estatísticas
+        self.download_stats = {
+            'total': len(files_list),
+            'completed': len(files_list) - len(files_to_process),  # Já pulados
+            'failed': 0,
+            'skipped': len(files_list) - len(files_to_process)
+        }
+        
+        if not files_to_process:
+            print("Todos os mods já estão atualizados")
+            return {'success': True, 'results': []}
+        
+        results = []
+        failed_downloads = []
+        
+        # ThreadPoolExecutor para controle melhor dos recursos
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers, 
+                                                 thread_name_prefix="ModDownload") as executor:
+            # Submete todas as tarefas
+            future_to_file = {
+                executor.submit(self._download_single_mod, file_info): file_info 
+                for file_info in files_to_process
+            }
+            
+            # Processa resultados conforme completam
+            for future in concurrent.futures.as_completed(future_to_file):
+                file_info = future_to_file[future]
+                try:
+                    result = future.result(timeout=300)  # 5 min timeout por arquivo
+                    results.append(result)
+                    
+                    if result['status'] == 'failed':
+                        failed_downloads.append({
+                            'file': result['file'],
+                            'error': result.get('error', 'Unknown error')
+                        })
+                        
+                except concurrent.futures.TimeoutError:
+                    failed_downloads.append({
+                        'file': file_info.get('path', 'unknown'),
+                        'error': 'Download timeout'
+                    })
+                    with self.stats_lock:
+                        self.download_stats['failed'] += 1
+                    self._update_progress()
+                    
+                except Exception as e:
+                    failed_downloads.append({
+                        'file': file_info.get('path', 'unknown'),
+                        'error': str(e)
+                    })
+                    with self.stats_lock:
+                        self.download_stats['failed'] += 1
+                    self._update_progress()
+        
+        # Relatório final
+        with self.stats_lock:
+            total = self.download_stats['total']
+            completed = self.download_stats['completed']
+            failed = self.download_stats['failed']
+            skipped = self.download_stats['skipped']
+        
+        print(f"Download concluído: {completed} sucessos, {failed} falhas, {skipped} pulados de {total} total")
+        
+        if failed_downloads:
+            print("Falhas de download:")
+            for fail in failed_downloads[:5]:  # Mostra apenas primeiros 5
+                print(f"  - {fail['file']}: {fail['error']}")
+            if len(failed_downloads) > 5:
+                print(f"  ... e mais {len(failed_downloads) - 5} falhas")
+        
+        return {
+            'success': failed == 0,
+            'results': results,
+            'stats': self.download_stats,
+            'failed_downloads': failed_downloads
+        }
 
 class AuthThread(QThread):
     auth_success = pyqtSignal(object, str)
@@ -373,43 +583,56 @@ class MinecraftThread(QThread):
             return False
 
     def _extract_mrpack(self, mrpack_path):
-        """Extrai o arquivo .mrpack e processa seus conteúdos"""
+        """Versão melhorada da extração com download paralelo"""
         try:
             temp_dir = self.game_dir / "temp_mrpack"
             if temp_dir.exists():
                 shutil.rmtree(temp_dir)
             temp_dir.mkdir()
+            
+            # Extrai o mrpack
             with zipfile.ZipFile(mrpack_path, 'r') as zip_ref:
                 zip_ref.extractall(temp_dir)
+            
             index_path = temp_dir / "modrinth.index.json"
             if not index_path.exists():
                 raise Exception("modrinth.index.json não encontrado no modpack")
+            
             with open(index_path, 'r', encoding='utf-8') as f:
                 self.mrpack_data = json.load(f)
+            
             files = self.mrpack_data.get('files', [])
             mods_dir = self.game_dir / "mods"
             mods_dir.mkdir(exist_ok=True)
             
-            # LIMPEZA: Remove mods antigos
+            # Limpeza de mods antigos
             self.status_update.emit("Limpando mods antigos...")
             self.progress_update.emit(35)
             self._clean_old_mods(mods_dir, files)
             
-            self.status_update.emit("Baixando mods...")
+            # Download paralelo
+            self.status_update.emit("Baixando mods (paralelo)...")
             self.progress_update.emit(40)
             
-            total_files = len(files)
-            for i, file_info in enumerate(files):
-                if not self._download_mod_file(file_info, self.game_dir):
-                    print(f"Falha ao baixar: {file_info.get('path', 'arquivo desconhecido')}")
-                progress = 40 + int((i + 1) / total_files * 15)
-                self.progress_update.emit(progress)
+            # Usa o novo sistema de download
+            downloader = ModDownloader(self.game_dir, self.progress_update.emit)
+            download_result = downloader.download_mods_parallel(files)
             
+            if not download_result['success']:
+                failed_count = len(download_result['failed_downloads'])
+                if failed_count > len(files) * 0.1:  # Mais de 10% falharam
+                    raise Exception(f"Muitas falhas no download: {failed_count} arquivos")
+                else:
+                    print(f"Download concluído com {failed_count} falhas menores")
+            
+            # Aplica overrides
             self.status_update.emit("Aplicando overrides...")
             self.progress_update.emit(55)
             self._apply_overrides(temp_dir)
+            
             shutil.rmtree(temp_dir)
             return True
+            
         except Exception as e:
             print(f"Erro na extração do mrpack: {e}")
             return False
