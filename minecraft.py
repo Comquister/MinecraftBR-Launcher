@@ -8,7 +8,6 @@ from portablemc.fabric import FabricVersion
 from portablemc.forge import ForgeVersion, _NeoForgeVersion
 from portablemc.auth import MicrosoftAuthSession
 from flask import Flask, request
-
 def calculate_optimal_ram():
     total_ram_gb = psutil.virtual_memory().total / (1024**3)
     available_ram_gb = max(1, total_ram_gb - 2)
@@ -16,7 +15,6 @@ def calculate_optimal_ram():
         optimal_ram_gb = min(available_ram_gb * 0.7, 8)
     else:
         optimal_ram_gb = min(available_ram_gb * 0.5, 3)
-    
     return max(1, int(optimal_ram_gb * 1024))
 def calculate_sha256(file_path):
     """Calcula SHA256 de um arquivo"""
