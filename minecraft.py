@@ -1,8 +1,6 @@
-import sys, platform, psutil, zipfile, subprocess, json, hashlib, random, concurrent.futures, pickle, webbrowser, requests, time, threading, os
+import sys, platform, psutil, zipfile, subprocess, json, hashlib, random, concurrent.futures, pickle, webbrowser, requests, time, threading, os, shutil
 from pathlib import Path
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                            QHBoxLayout, QLabel, QPushButton, QRadioButton, 
-                            QButtonGroup, QInputDialog, QMessageBox)
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QRadioButton, QButtonGroup, QInputDialog, QMessageBox)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap, QPalette, QBrush, QIcon
 from portablemc.standard import Version, Context
@@ -10,9 +8,7 @@ from portablemc.fabric import FabricVersion
 from portablemc.forge import ForgeVersion, _NeoForgeVersion
 from portablemc.auth import MicrosoftAuthSession
 from flask import Flask, request
-import shutil
 
-# FUNÇÕES GLOBAIS (fora das classes)
 def calculate_optimal_ram():
     """Calcula a quantidade ótima de RAM baseada no sistema"""
     total_ram_gb = psutil.virtual_memory().total / (1024**3)
@@ -29,7 +25,6 @@ def calculate_optimal_ram():
         optimal_ram_gb = min(available_ram_gb * 0.5, 3)  # Máximo 3GB
     
     return max(1, int(optimal_ram_gb * 1024))  # Retorna em MB
-
 def calculate_sha256(file_path):
     """Calcula SHA256 de um arquivo"""
     sha256_hash = hashlib.sha256()
@@ -40,7 +35,6 @@ def calculate_sha256(file_path):
         return f"sha256:{sha256_hash.hexdigest()}"
     except Exception:
         return None
-
 def diagnose_jvm_issues():
     """Função para diagnosticar problemas JVM"""
     print("=== DIAGNÓSTICO JVM ===")
@@ -61,25 +55,19 @@ def diagnose_jvm_issues():
         print("⚠ Sistema 32-bit - RAM limitada a 3GB")
     
     print("=" * 25)
-
 releasesgithub = requests.get("https://api.github.com/repos/Comquister/MinecraftBR-Launcher/releases/latest").json()["assets"]
 CONFIG = {
     'Title': 'MinecraftBr Launcher',
     'RAM_SIZE': f"{calculate_optimal_ram()}M",
     'CLIENT_ID': "708e91b5-99f8-4a1d-80ec-e746cbb24771",
-    
-    # Configuração do Modpack
     'MRPACK_URL': str(next(a["browser_download_url"] for a in releasesgithub if a["name"].endswith(".mrpack"))),
-    'MRPACK_HASH': str(next(a["digest"] for a in releasesgithub if a["name"].endswith(".mrpack")))
-,
-    
+    'MRPACK_HASH': str(next(a["digest"] for a in releasesgithub if a["name"].endswith(".mrpack"))),
     'PORTWEB': random.randint(49152, 65535)
 }
 CONFIG['REDIRECT_URI'] = f"http://localhost:{CONFIG['PORTWEB']}/code"
-
+CONFIG_PROTECTION = {'enabled': True, 'protected_files': ['config/distanthorizons.toml', 'options.txt', 'config/custom.cfg']}
+def is_protected_file(file_path): return CONFIG_PROTECTION['enabled'] and any(str(file_path).replace('\\', '/').endswith(protected) for protected in CONFIG_PROTECTION.get('protected_files', []))
 auth_data = {'success': None, 'code': None, 'id_token': None}
-
-# Funções utilitárias
 def save_login_data(game_dir, login_type, data):
     login_file = game_dir / "last_login.dat"
     try:
@@ -88,7 +76,6 @@ def save_login_data(game_dir, login_type, data):
             pickle.dump(login_info, f)
     except Exception as e:
         print(f"Erro ao salvar login: {e}")
-
 def load_login_data(game_dir):
     login_file = game_dir / "last_login.dat"
     try:
@@ -98,10 +85,8 @@ def load_login_data(game_dir):
     except Exception as e:
         print(f"Erro ao carregar login: {e}")
     return None
-
 def check_last(game_dir):
     return (game_dir / "options.txt").exists()
-
 def download_background(game_dir):
     bg_path = game_dir / "background.png"
     if not bg_path.exists():
@@ -114,7 +99,6 @@ def download_background(game_dir):
             print(f"Erro ao baixar background: {e}")
             return None
     return bg_path if bg_path.exists() else None
-
 def create_auth_app():
     app = Flask(__name__)
     app.logger.disabled = True
@@ -140,7 +124,6 @@ h1{color:#4cafef}p{color:#bbb}</style></head>
 <script>setTimeout(()=>window.close(),3000)</script></body></html>"""
     
     return app
-
 class ModDownloader:
     def __init__(self, game_dir, progress_callback=None):
         self.game_dir = game_dir
@@ -352,7 +335,6 @@ class ModDownloader:
             'stats': self.download_stats,
             'failed_downloads': failed_downloads
         }
-
 class AuthThread(QThread):
     auth_success = pyqtSignal(object, str)
     auth_error = pyqtSignal(str)
@@ -394,13 +376,11 @@ class AuthThread(QThread):
                 self.auth_error.emit("Falha na autenticação")
         except Exception as e:
             self.auth_error.emit(str(e))
-
 class MinecraftThread(QThread):
     status_update = pyqtSignal(str)
     progress_update = pyqtSignal(int)
     error_occurred = pyqtSignal(str)
     finished_success = pyqtSignal()
-    
     def __init__(self, game_dir, auth_session, username):
         super().__init__()
         self.game_dir = game_dir
@@ -408,7 +388,6 @@ class MinecraftThread(QThread):
         self.username = username
         self.context = Context(game_dir, game_dir)
         self.mrpack_data = None
-    
     def run(self):
         try:
             self.game_dir.mkdir(exist_ok=True)
@@ -516,7 +495,6 @@ class MinecraftThread(QThread):
             error_msg = f"Erro: {str(e)}\nDetalhes: {traceback.format_exc()}"
             print(error_msg)  # Log para debug
             self.error_occurred.emit(str(e))
-    
     def _sync_mrpack(self):
         """Sincroniza o arquivo .mrpack e extrai seus conteúdos"""
         try:
@@ -581,7 +559,6 @@ class MinecraftThread(QThread):
         except Exception as e:
             print(f"Erro na sincronização do mrpack: {e}")
             return False
-
     def _extract_mrpack(self, mrpack_path):
         """Versão melhorada da extração com download paralelo"""
         try:
@@ -636,7 +613,6 @@ class MinecraftThread(QThread):
         except Exception as e:
             print(f"Erro na extração do mrpack: {e}")
             return False
-
     def _download_mod_file(self, file_info, base_dir):
         """Baixa um arquivo de mod individual"""
         try:
@@ -692,31 +668,30 @@ class MinecraftThread(QThread):
                         existing_file.unlink()
                         print(f"Removido: {relative_path}")
         except Exception as e:
-            print(f"Erro ao limpar mods antigos: {e}")
-    def _apply_overrides(self, temp_dir):
-        """Aplica os arquivos de override do modpack"""
-        try:
-            # Verifica diferentes tipos de override
-            override_dirs = ['overrides', 'client-overrides']
-            
-            for override_name in override_dirs:
-                override_path = temp_dir / override_name
-                if override_path.exists() and override_path.is_dir():
-                    # Copia todos os arquivos para o diretório do jogo
-                    for item in override_path.rglob('*'):
-                        if item.is_file():
-                            relative_path = item.relative_to(override_path)
-                            target_path = self.game_dir / relative_path
-                            
-                            # Cria diretórios pais se necessário
-                            target_path.parent.mkdir(parents=True, exist_ok=True)
-                            
-                            # Copia o arquivo
-                            shutil.copy2(item, target_path)
-                            
-        except Exception as e:
-            print(f"Erro ao aplicar overrides: {e}")
-    
+            print(f"Erro ao limpar mods antigos: {e}")  
+    def backup_protected_configs(self):
+        backup_dir = self.game_dir / "config_backups"
+        backup_dir.mkdir(exist_ok=True)
+        backed_up = []
+        for protected in CONFIG_PROTECTION.get('protected_files', []):
+            config_path = self.game_dir / protected
+            if config_path.exists():
+                backup_path = backup_dir / f"{config_path.name}.backup"
+                shutil.copy2(config_path, backup_path)
+                backed_up.append(protected)
+        return backed_up
+    def restore_protected_configs(self):
+        backup_dir = self.game_dir / "config_backups"
+        if not backup_dir.exists(): return []
+        restored = []
+        for protected in CONFIG_PROTECTION.get('protected_files', []):
+            config_path = self.game_dir / protected
+            backup_path = backup_dir / f"{Path(protected).name}.backup"
+            if backup_path.exists():
+                config_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(backup_path, config_path)
+                restored.append(protected)
+        return restored
     def _get_minecraft_version_from_mrpack(self):
         """Obtém a versão do Minecraft do arquivo mrpack"""
         try:
@@ -729,7 +704,6 @@ class MinecraftThread(QThread):
         except Exception as e:
             print(f"Erro ao obter versão do Minecraft: {e}")
             return None
-    
     def _get_modloader_from_mrpack(self):
         """Obtém informações do modloader do arquivo mrpack"""
         try:
@@ -759,7 +733,33 @@ class MinecraftThread(QThread):
         except Exception as e:
             print(f"Erro ao obter modloader: {e}")
             return {'name': 'vanilla', 'version': None}
-
+    def _apply_overrides(self, temp_dir):
+        try:
+            backed_up = self.backup_protected_configs() if CONFIG_PROTECTION['enabled'] else []
+            if backed_up: print(f"Backup de configs protegidas: {backed_up}")
+            
+            override_dirs = ['overrides', 'client-overrides']
+            for override_name in override_dirs:
+                override_path = temp_dir / override_name
+                if override_path.exists() and override_path.is_dir():
+                    for item in override_path.rglob('*'):
+                        if item.is_file():
+                            relative_path = item.relative_to(override_path)
+                            target_path = self.game_dir / relative_path
+                            
+                            if is_protected_file(relative_path):
+                                print(f"Arquivo protegido ignorado: {relative_path}")
+                                continue
+                            
+                            target_path.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(item, target_path)
+            
+            if CONFIG_PROTECTION['enabled']:
+                restored = self.restore_protected_configs()
+                if restored: print(f"Configs restauradas: {restored}")
+                
+        except Exception as e:
+            print(f"Erro ao aplicar overrides: {e}")
 class MinecraftLauncher(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -776,7 +776,6 @@ class MinecraftLauncher(QMainWindow):
         
         self.init_ui()
         self.load_background()
-
     def init_ui(self):
         self.setWindowTitle(CONFIG['Title'])
         # Define ícone da janela# Baixa o ícone da URL
@@ -1033,12 +1032,10 @@ class MinecraftLauncher(QMainWindow):
         
         # Spacer inferior
         main_layout.addStretch()
-
     def resizeEvent(self, event):
         super().resizeEvent(event)
         # Reposiciona o botão config
         self.config_btn.move(self.width() - 60, 20)
-
     def update_play_button_progress(self, progress, text=""):
         if progress == 0:
             # Estado normal
@@ -1078,7 +1075,6 @@ class MinecraftLauncher(QMainWindow):
                     font-weight: bold;
                 }}
             """)
-
     def load_background(self):
         """Carrega background customizado ou usa gradiente padrão"""
         try:
@@ -1102,7 +1098,6 @@ class MinecraftLauncher(QMainWindow):
                     return
         except Exception as e:
             print(f"Erro ao carregar background customizado: {e}")
-
     def _setup_last_login(self):
         if not self.last_login_data:
             return
@@ -1121,7 +1116,6 @@ class MinecraftLauncher(QMainWindow):
             username = login_data.get('username', 'Usuário')
             self.user_display.setText(f"Microsoft: {username}")
             self.user_display.setStyleSheet(self.user_display.styleSheet() + "color: #FFFFFF;")
-
     def on_login_selection(self, button):
         button_id = self.login_group.id(button)
         
@@ -1131,7 +1125,6 @@ class MinecraftLauncher(QMainWindow):
             self._handle_microsoft_login()
         elif button_id == 2:  # Offline
             self._handle_offline_login()
-
     def _handle_last_login(self):
         if not self.last_login_data:
             return
@@ -1155,7 +1148,6 @@ class MinecraftLauncher(QMainWindow):
                 self.user_display.setStyleSheet(self.user_display.styleSheet() + "color: #FFFFFF;")
                 self.status_label.setText(f"Pronto para jogar como {username} (Offline)")
                 self.play_btn.setEnabled(True)
-
     def _handle_microsoft_login(self):
         email, ok = QInputDialog.getText(self, "Login Microsoft", "Digite seu email Microsoft:")
         if ok and email.strip():
@@ -1164,7 +1156,6 @@ class MinecraftLauncher(QMainWindow):
             self.status_label.setText("Clique em JOGAR para autenticar")
             self.play_btn.setEnabled(True)
             self._pending_auth_email = email.strip()
-
     def _handle_offline_login(self):
         default_name = ""
         if self.last_login_data and self.last_login_data['type'] == 'offline':
@@ -1181,7 +1172,6 @@ class MinecraftLauncher(QMainWindow):
             self.status_label.setText(f"Pronto para jogar como {self.username} (Offline)")
             self.play_btn.setEnabled(True)
             save_login_data(self.game_dir, 'offline', {'username': self.username})
-
     def _start_auth(self, email):
         if self.auth_thread and self.auth_thread.isRunning():
             return
@@ -1189,8 +1179,7 @@ class MinecraftLauncher(QMainWindow):
         self.auth_thread = AuthThread(email)
         self.auth_thread.auth_success.connect(self._on_auth_success)
         self.auth_thread.auth_error.connect(self._on_auth_error)
-        self.auth_thread.start()
-    
+        self.auth_thread.start()  
     def _on_auth_success(self, auth_session, email):
         self.auth_session = auth_session
         self.username = None
@@ -1211,13 +1200,11 @@ class MinecraftLauncher(QMainWindow):
         self.minecraft_thread.error_occurred.connect(self._on_minecraft_error)
         self.minecraft_thread.finished_success.connect(self.close)
         self.minecraft_thread.start()
-
     def _on_auth_error(self, error):
         self.play_btn.setEnabled(True)
         self.update_play_button_progress(0)  # Reseta o botão
         self.status_label.setText(f"Erro na autenticação: {error}")
         QMessageBox.critical(self, "Erro", f"Erro no login: {error}")
-
     def on_play(self):
         # Verifica se precisa fazer login primeiro
         selected_button = self.login_group.checkedButton()
@@ -1261,17 +1248,14 @@ class MinecraftLauncher(QMainWindow):
         self.minecraft_thread.error_occurred.connect(self._on_minecraft_error)
         self.minecraft_thread.finished_success.connect(self.close)
         self.minecraft_thread.start()
-
     def on_progress_update(self, progress):
         self.current_progress = progress
         self.update_play_button_progress(progress)
-
     def _on_minecraft_error(self, error):
         self.status_label.setText("Erro ao iniciar")
         self.update_play_button_progress(0)  # Reseta o botão
         self.play_btn.setEnabled(True)
         QMessageBox.critical(self, "Erro", f"Erro: {error}")
-
     def on_config(self):
         game_dir_str = str(self.game_dir)
         
@@ -1294,7 +1278,6 @@ Deseja abrir o diretório do jogo?"""
                     subprocess.run(['xdg-open', game_dir_str])
             except Exception as e:
                 QMessageBox.critical(self, "Erro", f"Erro ao abrir diretório: {e}")
-
     def on_about(self):
         about_text = f"""
 {CONFIG['Title']}
@@ -1306,18 +1289,11 @@ Deseja abrir o diretório do jogo?"""
 Desenvolvido para a comunidade MinecraftBR
         """
         QMessageBox.about(self, "Sobre", about_text.strip())
-
 def main():
-    # Para debug - descomente a linha abaixo se precisar diagnosticar
-    # diagnose_jvm_issues()
-    
     app = QApplication(sys.argv)
     app.setApplicationName("MinecraftBr Launcher")
-    
     launcher = MinecraftLauncher()
     launcher.show()
-    
     sys.exit(app.exec())
-
 if __name__ == "__main__":
     main()
