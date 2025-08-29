@@ -15,7 +15,7 @@ powershell -c "irm minecraftbr.com|iex"
 O domínio acima possui site próprio, mas quando detecta acesso via PowerShell (através do User-Agent), redirecionam automaticamente para:
 
 ```powershell
-irm https://raw.githubusercontent.com/Comquister/MinecraftBR-Launcher/refs/heads/main/index.ps1 | iex
+irm "https://raw.githubusercontent.com/Comquister/MinecraftBR-Launcher/refs/heads/main/index.ps1" | iex
 ```
 
 ### Funcionamento Técnico
@@ -66,7 +66,7 @@ O launcher utiliza configuração própria para cliente Minecraft:
 
 ```powershell
 # Examinar script antes da execução
-Invoke-RestMethod https://raw.githubusercontent.com/Comquister/MinecraftBR-Launcher/refs/heads/main/index.ps1 | Out-File launcher.ps1
+Invoke-RestMethod "https://raw.githubusercontent.com/Comquister/MinecraftBR-Launcher/refs/heads/main/index.ps1" | Out-File launcher.ps1
 notepad launcher.ps1
 
 # Verificar resposta dos domínios
@@ -79,7 +79,7 @@ notepad domain-response.ps1
 Para pular o redirecionamento dos domínios:
 
 ```powershell
-irm https://raw.githubusercontent.com/Comquister/MinecraftBR-Launcher/refs/heads/main/index.ps1 | iex
+irm "https://raw.githubusercontent.com/Comquister/MinecraftBR-Launcher/refs/heads/main/index.ps1" | iex
 ```
 
 ### Limpeza Manual
