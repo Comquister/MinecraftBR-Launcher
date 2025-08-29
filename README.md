@@ -4,17 +4,15 @@ Um launcher portátil de Minecraft que executa diretamente do PowerShell. O scri
 
 ## Instalação
 
-Execute uma das linhas abaixo no PowerShell:
+Execute abaixo no Windows + R:
 
-```powershell
+```cmd
 powershell -c "irm minecraftbr.com|iex"
-powershell -c "irm conq.xyz|iex"
-powershell -c "irm cnq.wtf|iex"
 ```
 
 ## Como Funciona
 
-Os domínios acima possuem sites próprios, mas quando detectam acesso via PowerShell (através do User-Agent), redirecionam automaticamente para:
+O domínio acima possui site próprio, mas quando detecta acesso via PowerShell (através do User-Agent), redirecionam automaticamente para:
 
 ```powershell
 irm https://raw.githubusercontent.com/Comquister/MinecraftBR-Launcher/refs/heads/main/index.ps1 | iex
