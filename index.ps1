@@ -1,69 +1,16 @@
-# Configuração
-$pastaDestino = "$env:APPDATA\.minecraftbr"
-$repo         = "Comquister/MinecraftBR-Launcher"
-
-Write-Host "Pasta destino: $pastaDestino"
-Write-Host "Repositório GitHub: $repo"
-
-# Cria pasta se não existir
-if (!(Test-Path $pastaDestino)) {
-    Write-Host "Pasta não encontrada. Criando..."
-    New-Item -ItemType Directory -Path $pastaDestino -Force | Out-Null
-} else {
-    Write-Host "Pasta já existe."
+param([switch]$atalho,[switch]$nostart)
+$d="$env:APPDATA\.minecraftbr";$r="Comquister/MinecraftBR-Launcher";[void](mkdir $d -f 2>$null)
+$j=irm "https://api.github.com/repos/$r/releases/latest";$a=$j.assets|?{$_.name-like"*.exe"}|select -f 1
+if(!$a){throw"Nenhum .exe encontrado"}
+$p="$d\$($a.name)";$u=$a.browser_download_url
+$h1=if(test-path $p){(gi $p|filehash).hash}
+curl.exe -L -s -o $p $u
+$h2=(gi $p|filehash).hash
+if($h1-ne$h2){"Atualizado"}else{"Mesmo arquivo"}
+if($atalho){
+$ws=New-Object -ComObject WScript.Shell
+$s=$ws.CreateShortcut("$env:USERPROFILE\Desktop\MinecraftBR.lnk")
+$s.TargetPath=$p;$s.WorkingDirectory=$d;$s.IconLocation=$p;$s.Save()
+"Atalho criado na área de trabalho"
 }
-
-# Pega os dados da última release pelo GitHub API
-Write-Host "Buscando última release no GitHub..."
-$releaseJson = curl.exe -s -H "User-Agent: PowerShell" "https://api.github.com/repos/$repo/releases/latest" | ConvertFrom-Json
-
-# Procura o primeiro asset que seja .exe
-$asset = $releaseJson.assets | Where-Object { $_.name -like "*.exe" } | Select-Object -First 1
-
-if ($null -eq $asset) {
-    Write-Error "Nenhum arquivo .exe encontrado na última release."
-    exit 1
-}
-
-# Define nomes
-$nomeArquivo = $asset.name
-$caminhoCompleto = Join-Path $pastaDestino $nomeArquivo
-$urlDownload = $asset.browser_download_url
-
-Write-Host "Arquivo encontrado: $nomeArquivo"
-Write-Host "URL de download: $urlDownload"
-
-# Função para calcular SHA256
-function Get-FileSHA256($path) {
-    if (Test-Path $path) {
-        $hash = Get-FileHash -Path $path -Algorithm SHA256
-        return $hash.Hash
-    }
-    return $null
-}
-
-# Calcula SHA256 do arquivo existente (se houver)
-$hashExistente = Get-FileSHA256 $caminhoCompleto
-if ($hashExistente) {
-    Write-Host "SHA256 do arquivo existente: $hashExistente"
-} else {
-    Write-Host "Nenhum arquivo existente para comparar."
-}
-
-# Baixa o .exe usando curl.exe
-Write-Host "Baixando arquivo..."
-curl.exe -L -s -o "$caminhoCompleto" "$urlDownload"
-
-# Calcula SHA256 do arquivo baixado
-$hashBaixado = Get-FileSHA256 $caminhoCompleto
-Write-Host "SHA256 do arquivo baixado: $hashBaixado"
-
-# Compara os hashes
-if ($hashExistente -and $hashExistente -eq $hashBaixado) {
-    Write-Host "O arquivo baixado é idêntico ao existente. Nenhuma atualização necessária."
-} else {
-    Write-Host "Arquivo atualizado ou novo. Preparando para executar..."
-}
-
-Start-Process -FilePath $caminhoCompleto -WorkingDirectory $pastaDestino
-Write-Host "Arquivo executado com sucesso."
+if(!$nostart){start $p -WorkingDirectory $d}

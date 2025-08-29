@@ -1,4 +1,4 @@
-import sys, platform, psutil, zipfile, subprocess, json, hashlib, random, concurrent.futures, pickle, webbrowser, requests, time, threading, os, shutil
+import sys, platform, psutil, zipfile, subprocess, json, hashlib, random, concurrent.futures, pickle, webbrowser, requests, time, threading, os, shutil, logging
 from pathlib import Path
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QRadioButton, QButtonGroup, QInputDialog, QMessageBox)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
@@ -11,10 +11,7 @@ from flask import Flask, request
 def calculate_optimal_ram():
     total_ram_gb = psutil.virtual_memory().total / (1024**3)
     available_ram_gb = max(1, total_ram_gb - 2)
-    if platform.machine().endswith('64'):
-        optimal_ram_gb = min(available_ram_gb * 0.7, 8)
-    else:
-        optimal_ram_gb = min(available_ram_gb * 0.5, 3)
+    optimal_ram_gb = min(available_ram_gb * 0.7, 12)
     return max(1, int(optimal_ram_gb * 1024))
 def calculate_sha256(file_path):
     """Calcula SHA256 de um arquivo"""
@@ -92,9 +89,6 @@ def download_background(game_dir):
 def create_auth_app():
     app = Flask(__name__)
     app.logger.disabled = True
-    
-    # Adicione estas linhas para suprimir completamente os logs
-    import logging
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
     
@@ -203,20 +197,14 @@ class ModDownloader:
             file_path = Path(file_info['path'])
             full_path = self.game_dir / file_path
             expected_sha256 = file_info.get('hashes', {}).get('sha256')
-            
-            # Verifica se precisa baixar
             needs_download = True
             if full_path.exists() and expected_sha256:
                 current_hash = calculate_sha256(full_path)
                 if current_hash == expected_sha256:
-                    needs_download = False
-            
+                    needs_download = False 
             if needs_download:
                 files_to_process.append(file_info)
-        
         print(f"Iniciando download paralelo: {len(files_to_process)} arquivos com {max_workers} workers")
-        
-        # Inicializa estatísticas
         self.download_stats = {
             'total': len(files_list),
             'completed': len(files_list) - len(files_to_process),
@@ -267,7 +255,7 @@ class ModDownloader:
         print(f"Download concluído: {completed} sucessos, {failed} falhas, {skipped} pulados de {total} total")
         if failed_downloads:
             print("Falhas de download:")
-            for fail in failed_downloads[:5]:  # Mostra apenas primeiros 5
+            for fail in failed_downloads[:5]:
                 print(f"  - {fail['file']}: {fail['error']}")
             if len(failed_downloads) > 5:
                 print(f"  ... e mais {len(failed_downloads) - 5} falhas")
