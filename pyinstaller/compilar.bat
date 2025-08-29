@@ -1,6 +1,0 @@
-rmdir /s /q ".\build"
-rmdir /s /q ".\dist"
-del /f /q ".\MinecraftBr.spec"
-pyinstaller --noconfirm --onefile --windowed --icon "..\image\favicon.ico" --optimize "2" --name "MinecraftBr" .\minecraft.run.py"
-rmdir /s /q ".\build"
-del /f /q ".\MinecraftBr.spec"

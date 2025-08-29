@@ -1,0 +1,43 @@
+name: Build MinecraftBR Launcher
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller psutil requests flask PyQt6 portablemc
+
+      - name: Build binary with PyInstaller
+        run: |
+          pyinstaller --noconfirm --onefile --windowed \
+            --icon "image/favicon.ico" \
+            --optimize "2" \
+            --name "MinecraftBr" \
+            minecraft.build.py
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MinecraftBR-${{ matrix.os }}
+          path: dist/*
