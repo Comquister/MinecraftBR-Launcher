@@ -648,7 +648,6 @@ class MinecraftLauncher(QMainWindow):
         self.load_background()
     def init_ui(self):
         self.setWindowTitle(CONFIG['Title'])
-        # Define ícone da janela# Baixa o ícone da URL
         try:
             icon_url = "https://raw.githubusercontent.com/Comquister/MinecraftBR-Launcher/refs/heads/main/image/favicon.ico"
             response = requests.get(icon_url, timeout=10)
@@ -709,17 +708,11 @@ class MinecraftLauncher(QMainWindow):
                 border: 1px solid #AAA;
             }
         """)
-        
-        # Widget central
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        
-        # Layout principal
         main_layout = QVBoxLayout(central_widget)
         main_layout.setSpacing(0)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Header com botão config (posição absoluta)
         self.config_btn = QPushButton("⚙️", self)
         self.config_btn.setFixedSize(40, 40)
         self.config_btn.move(self.width() - 60, 20)
@@ -735,15 +728,9 @@ class MinecraftLauncher(QMainWindow):
             }
         """)
         self.config_btn.clicked.connect(self.on_config)
-        
-        # Spacer superior
         main_layout.addStretch()
-        
-        # Logo/Título
         self.logo = QLabel()
         self.logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        # Carrega logo da URL
         logo_url = "https://github.com/Comquister/MinecraftBR-Launcher/blob/main/image/logo.png?raw=true"
         try:
             response = requests.get(logo_url, timeout=10)
@@ -753,16 +740,11 @@ class MinecraftLauncher(QMainWindow):
                 self.logo.setPixmap(pixmap.scaledToWidth(300, Qt.TransformationMode.SmoothTransformation))
         except Exception as e:
             print(f"Erro ao carregar logo: {e}")
-
         main_layout.addWidget(self.logo)
-
-        
-        # Container centralizado com tamanho fixo
         container_wrapper = QHBoxLayout()
         container_wrapper.addStretch()
-        
         container = QWidget()
-        container.setFixedSize(330, 400)  # Tamanho fixo
+        container.setFixedSize(330, 400)
         container.setStyleSheet("""
             QWidget {
                 background-color: rgba(0, 0, 0, 0.7);
@@ -773,12 +755,6 @@ class MinecraftLauncher(QMainWindow):
         container_layout = QVBoxLayout(container)
         container_layout.setSpacing(20)
         container_layout.setContentsMargins(40, 30, 40, 30)
-        
-        # Campo de usuário
-        # user_label = QLabel("Usuário")
-        # user_label.setStyleSheet("font-size: 14px; color: #CCCCCC; margin-bottom: 5px;")
-        # container_layout.addWidget(user_label)
-        
         self.user_display = QLabel("Nome de usuário ou e-mail")
         self.user_display.setStyleSheet("""
             QLabel {
@@ -791,30 +767,22 @@ class MinecraftLauncher(QMainWindow):
             }
         """)
         container_layout.addWidget(self.user_display)
-        
-        # Opções de login
         login_options_layout = QVBoxLayout()
         login_options_layout.setSpacing(10)
-        
-        # Radio buttons para login
         self.login_group = QButtonGroup()
-        
-        # Último login se existir
         if self.last_login_data:
             login_type = self.last_login_data['type']
             if login_type == 'microsoft':
                 email = self.last_login_data['data'].get('email', 'Email Microsoft')
-                text = f"🔄 Último: {email[:10] + "..." if len(email) > 10 else email}"
+                short_email = email[:10] + "..." if len(email) > 10 else email
+                text = f"🔄 Último: {short_email}"
             else:
                 username = self.last_login_data['data'].get('username', 'Jogador')
                 text = f"🔄 Último: {username}"
-            
             self.last_radio = QRadioButton(text)
             self.last_radio.setChecked(True)
             self.login_group.addButton(self.last_radio, 0)
             login_options_layout.addWidget(self.last_radio)
-            
-            # Configura último login automaticamente
             self._setup_last_login()
         
         # Microsoft
