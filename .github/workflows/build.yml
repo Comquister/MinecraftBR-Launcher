@@ -30,11 +30,8 @@ jobs:
 
       - name: Build binary with PyInstaller
         run: |
-          pyinstaller --noconfirm --onefile --windowed \
-            --icon "image/favicon.ico" \
-            --optimize "2" \
-            --name "MinecraftBr" \
-            minecraft.build.py
+          pyinstaller --noconfirm --onefile --windowed --icon "image/favicon.ico" --optimize "2" --name "MinecraftBr" minecraft.build.py
+
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
