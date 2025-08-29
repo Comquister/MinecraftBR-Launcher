@@ -46,7 +46,7 @@ def diagnose_jvm_issues():
         print("⚠ Sistema 32-bit - RAM limitada a 3GB")
     
     print("=" * 25)
-releasesgithub = requests.get("https://api.github.com/repos/Comquister/MinecraftBR-Launcher/releases/latest").json()["assets"]
+releasesgithub = requests.get("https://api.github.com/repos/Comquister/MinecraftBR-Modpack/releases/latest").json()["assets"]
 CONFIG = {
     'Title': 'MinecraftBr Launcher',
     'GameDir': Path(os.getenv("APPDATA")) / ".minecraftbr",

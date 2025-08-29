@@ -1,40 +1,96 @@
 name: Build MinecraftBR Launcher
-
 on:
   push:
     branches: [main]
+    paths: ['minecraft.build.py']
   workflow_dispatch:
   release:
     types: [published]
 
 jobs:
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      should-release: ${{ steps.check.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: check
+        run: echo "changed=$(git diff HEAD^ HEAD --name-only | grep -E '^minecraft\.build\.py
+
   build:
+    needs: check-changes
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [windows-latest, ubuntu-latest]
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.8"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyinstaller psutil requests flask PyQt6 portablemc
-
-      - name: Build binary with PyInstaller
-        run: |
-          pyinstaller --noconfirm --onefile --windowed --icon "image/favicon.ico" --name "MinecraftBr" minecraft.build.py
-
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+      - run: python -m pip install --upgrade pip && pip install pyinstaller psutil requests flask PyQt6 portablemc
+      - run: pyinstaller --noconfirm --onefile --windowed --icon "image/favicon.ico" --name "MinecraftBr" minecraft.build.py
+      - uses: actions/upload-artifact@v4
         with:
           name: MinecraftBR-${{ matrix.os }}
           path: dist/*
+
+  create-release:
+    needs: [check-changes, build]
+    if: needs.check-changes.outputs.should-release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        run: echo "tag=v$(date +'%Y%m%d%H%M%S')" >> $GITHUB_OUTPUT
+      - uses: actions/download-artifact@v4
+      - uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: MinecraftBR Auto Release ${{ steps.version.outputs.tag }}
+          files: |
+            MinecraftBR-windows-latest/*
+            MinecraftBR-ubuntu-latest/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} && ! git diff HEAD^ HEAD --name-only | grep -q 'minecraft.py' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+
+  build:
+    needs: check-changes
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.8"
+      - run: python -m pip install --upgrade pip && pip install pyinstaller psutil requests flask PyQt6 portablemc
+      - run: pyinstaller --noconfirm --onefile --windowed --icon "image/favicon.ico" --name "MinecraftBr" minecraft.build.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MinecraftBR-${{ matrix.os }}
+          path: dist/*
+
+  create-release:
+    needs: [check-changes, build]
+    if: needs.check-changes.outputs.should-release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        run: echo "tag=v$(date +'%Y%m%d%H%M%S')" >> $GITHUB_OUTPUT
+      - uses: actions/download-artifact@v4
+      - uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: MinecraftBR Auto Release ${{ steps.version.outputs.tag }}
+          files: |
+            MinecraftBR-windows-latest/*
+            MinecraftBR-ubuntu-latest/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
