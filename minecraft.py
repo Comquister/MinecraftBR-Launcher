@@ -10,21 +10,14 @@ from portablemc.auth import MicrosoftAuthSession
 from flask import Flask, request
 
 def calculate_optimal_ram():
-    """Calcula a quantidade ótima de RAM baseada no sistema"""
     total_ram_gb = psutil.virtual_memory().total / (1024**3)
-    
-    # Deixa pelo menos 2GB para o sistema
     available_ram_gb = max(1, total_ram_gb - 2)
-    
-    # Limita baseado no sistema
     if platform.machine().endswith('64'):
-        # Sistema 64-bit
-        optimal_ram_gb = min(available_ram_gb * 0.7, 8)  # Máximo 8GB
+        optimal_ram_gb = min(available_ram_gb * 0.7, 8)
     else:
-        # Sistema 32-bit
-        optimal_ram_gb = min(available_ram_gb * 0.5, 3)  # Máximo 3GB
+        optimal_ram_gb = min(available_ram_gb * 0.5, 3)
     
-    return max(1, int(optimal_ram_gb * 1024))  # Retorna em MB
+    return max(1, int(optimal_ram_gb * 1024))
 def calculate_sha256(file_path):
     """Calcula SHA256 de um arquivo"""
     sha256_hash = hashlib.sha256()
@@ -58,6 +51,7 @@ def diagnose_jvm_issues():
 releasesgithub = requests.get("https://api.github.com/repos/Comquister/MinecraftBR-Launcher/releases/latest").json()["assets"]
 CONFIG = {
     'Title': 'MinecraftBr Launcher',
+    'GameDir': Path(os.getenv("APPDATA")) / ".minecraftbr",
     'RAM_SIZE': f"{calculate_optimal_ram()}M",
     'CLIENT_ID': "708e91b5-99f8-4a1d-80ec-e746cbb24771",
     'MRPACK_URL': str(next(a["browser_download_url"] for a in releasesgithub if a["name"].endswith(".mrpack"))),
@@ -65,8 +59,7 @@ CONFIG = {
     'PORTWEB': random.randint(49152, 65535)
 }
 CONFIG['REDIRECT_URI'] = f"http://localhost:{CONFIG['PORTWEB']}/code"
-CONFIG_PROTECTION = {'enabled': True, 'protected_files': ['config/distanthorizons.toml', 'options.txt', 'config/custom.cfg']}
-def is_protected_file(file_path): return CONFIG_PROTECTION['enabled'] and any(str(file_path).replace('\\', '/').endswith(protected) for protected in CONFIG_PROTECTION.get('protected_files', []))
+CONFIG_PROTECTION = {'enabled': (CONFIG['GameDir'] / "options.txt").exists(), 'protected_files': ['config/distanthorizons.toml', 'options.txt']}
 auth_data = {'success': None, 'code': None, 'id_token': None}
 def save_login_data(game_dir, login_type, data):
     login_file = game_dir / "last_login.dat"
@@ -85,8 +78,7 @@ def load_login_data(game_dir):
     except Exception as e:
         print(f"Erro ao carregar login: {e}")
     return None
-def check_last(game_dir):
-    return (game_dir / "options.txt").exists()
+def is_protected_file(file_path): return CONFIG_PROTECTION['enabled'] and any(str(file_path).replace('\\', '/').endswith(protected) for protected in CONFIG_PROTECTION.get('protected_files', []))
 def download_background(game_dir):
     bg_path = game_dir / "background.png"
     if not bg_path.exists():
@@ -135,27 +127,19 @@ class ModDownloader:
             'skipped': 0
         }
         self.stats_lock = threading.Lock()
-    
     def _update_progress(self):
-        """Atualiza o progresso do download"""
         with self.stats_lock:
             total = self.download_stats['total']
             completed = self.download_stats['completed'] + self.download_stats['failed'] + self.download_stats['skipped']
-            
             if total > 0 and self.progress_callback:
                 progress = int((completed / total) * 100)
-                self.progress_callback(40 + int(progress * 0.15))  # 40% base + 15% para downloads
-    
+                self.progress_callback(40 + int(progress * 0.15))
     def _download_single_mod(self, file_info):
-        """Download de um único mod com retry automático"""
         try:
             file_path = Path(file_info['path'])
             full_path = self.game_dir / file_path
             full_path.parent.mkdir(parents=True, exist_ok=True)
-            
             expected_sha256 = file_info.get('hashes', {}).get('sha256')
-            
-            # Verifica se já existe e está correto
             if full_path.exists() and expected_sha256:
                 current_hash = calculate_sha256(full_path)
                 if current_hash == expected_sha256:
@@ -163,20 +147,15 @@ class ModDownloader:
                         self.download_stats['skipped'] += 1
                     self._update_progress()
                     return {'status': 'skipped', 'file': str(file_path)}
-            
             downloads = file_info.get('downloads', [])
             if not downloads:
                 with self.stats_lock:
                     self.download_stats['failed'] += 1
                 self._update_progress()
                 return {'status': 'failed', 'file': str(file_path), 'error': 'No download URLs'}
-            
-            # Tenta download de cada URL até conseguir
             for attempt, download_url in enumerate(downloads):
                 try:
-                    # Timeout baseado no tamanho estimado (máximo 300s)
                     timeout = min(120, max(30, file_info.get('fileSize', 1000000) // 100000))
-                    
                     response = requests.get(
                         download_url, 
                         timeout=timeout,
@@ -184,62 +163,43 @@ class ModDownloader:
                         headers={'User-Agent': 'MinecraftBR-Launcher/1.0'}
                     )
                     response.raise_for_status()
-                    
-                    # Download com verificação de tamanho
                     total_size = int(response.headers.get('content-length', 0))
                     downloaded = 0
-                    
                     with open(full_path, 'wb') as f:
                         for chunk in response.iter_content(chunk_size=8192):
                             if chunk:
                                 f.write(chunk)
                                 downloaded += len(chunk)
-                    
-                    # Verifica integridade se possível
                     if expected_sha256:
                         downloaded_hash = calculate_sha256(full_path)
                         if downloaded_hash != expected_sha256:
                             full_path.unlink()
-                            if attempt == len(downloads) - 1:  # Última tentativa
+                            if attempt == len(downloads) - 1:
                                 raise Exception(f"Hash incorreto: esperado {expected_sha256}, obtido {downloaded_hash}")
-                            continue  # Tenta próxima URL
-                    
+                            continue
                     with self.stats_lock:
                         self.download_stats['completed'] += 1
                     self._update_progress()
                     return {'status': 'success', 'file': str(file_path)}
-                    
                 except Exception as e:
                     if full_path.exists():
                         full_path.unlink()
-                    
-                    if attempt == len(downloads) - 1:  # Última tentativa
+                    if attempt == len(downloads) - 1:
                         with self.stats_lock:
                             self.download_stats['failed'] += 1
                         self._update_progress()
                         return {'status': 'failed', 'file': str(file_path), 'error': str(e)}
-                    # Continua para próxima URL
-            
         except Exception as e:
             with self.stats_lock:
                 self.download_stats['failed'] += 1
             self._update_progress()
             return {'status': 'failed', 'file': file_info.get('path', 'unknown'), 'error': str(e)}
-
     def download_mods_parallel(self, files_list, max_workers=None):
-        """
-        Download paralelo de mods
-        max_workers: Número de threads. Se None, usa núcleos do CPU * 2
-        """
         if not files_list:
             return {'success': True, 'results': []}
-        
-        # Calcula workers baseado nos núcleos do CPU
         if max_workers is None:
-            cpu_count = psutil.cpu_count(logical=False) or 4  # Núcleos físicos
-            max_workers = min(cpu_count * 2, 8)  # Máximo 8 para não sobrecarregar
-        
-        # Separa mods que precisam de download dos que podem ser pulados
+            cpu_count = psutil.cpu_count(logical=False) or 4
+            max_workers = min(cpu_count * 2, 8)
         files_to_process = []
         for file_info in files_list:
             file_path = Path(file_info['path'])
@@ -261,40 +221,30 @@ class ModDownloader:
         # Inicializa estatísticas
         self.download_stats = {
             'total': len(files_list),
-            'completed': len(files_list) - len(files_to_process),  # Já pulados
+            'completed': len(files_list) - len(files_to_process),
             'failed': 0,
             'skipped': len(files_list) - len(files_to_process)
         }
-        
         if not files_to_process:
             print("Todos os mods já estão atualizados")
             return {'success': True, 'results': []}
-        
         results = []
         failed_downloads = []
-        
-        # ThreadPoolExecutor para controle melhor dos recursos
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers, 
-                                                 thread_name_prefix="ModDownload") as executor:
-            # Submete todas as tarefas
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ModDownload") as executor:
             future_to_file = {
                 executor.submit(self._download_single_mod, file_info): file_info 
                 for file_info in files_to_process
             }
-            
-            # Processa resultados conforme completam
             for future in concurrent.futures.as_completed(future_to_file):
                 file_info = future_to_file[future]
                 try:
-                    result = future.result(timeout=300)  # 5 min timeout por arquivo
+                    result = future.result(timeout=300)
                     results.append(result)
-                    
                     if result['status'] == 'failed':
                         failed_downloads.append({
                             'file': result['file'],
                             'error': result.get('error', 'Unknown error')
                         })
-                        
                 except concurrent.futures.TimeoutError:
                     failed_downloads.append({
                         'file': file_info.get('path', 'unknown'),
@@ -303,7 +253,6 @@ class ModDownloader:
                     with self.stats_lock:
                         self.download_stats['failed'] += 1
                     self._update_progress()
-                    
                 except Exception as e:
                     failed_downloads.append({
                         'file': file_info.get('path', 'unknown'),
@@ -312,23 +261,18 @@ class ModDownloader:
                     with self.stats_lock:
                         self.download_stats['failed'] += 1
                     self._update_progress()
-        
-        # Relatório final
         with self.stats_lock:
             total = self.download_stats['total']
             completed = self.download_stats['completed']
             failed = self.download_stats['failed']
             skipped = self.download_stats['skipped']
-        
         print(f"Download concluído: {completed} sucessos, {failed} falhas, {skipped} pulados de {total} total")
-        
         if failed_downloads:
             print("Falhas de download:")
             for fail in failed_downloads[:5]:  # Mostra apenas primeiros 5
                 print(f"  - {fail['file']}: {fail['error']}")
             if len(failed_downloads) > 5:
                 print(f"  ... e mais {len(failed_downloads) - 5} falhas")
-        
         return {
             'success': failed == 0,
             'results': results,
@@ -391,27 +335,18 @@ class MinecraftThread(QThread):
     def run(self):
         try:
             self.game_dir.mkdir(exist_ok=True)
-            
-            # Sincroniza o modpack
             self.status_update.emit("Verificando modpack...")
             self.progress_update.emit(5)
-            
             if not self._sync_mrpack():
                 self.error_occurred.emit("Erro ao sincronizar modpack")
                 return
-            
-            # Obtém versões do modpack
             minecraft_version = self._get_minecraft_version_from_mrpack()
             modloader_info = self._get_modloader_from_mrpack()
-            
             if not minecraft_version:
                 self.error_occurred.emit("Versão do Minecraft não encontrada no modpack")
                 return
-            
             self.status_update.emit(f"Preparando {minecraft_version} com {modloader_info['name']}...")
             self.progress_update.emit(60)
-            
-            # Instancia a versão correta baseada no modloader
             if modloader_info['name'] == 'fabric-loader':
                 version = FabricVersion.with_fabric(minecraft_version, modloader_info['version'], context=self.context)
             elif modloader_info['name'] == 'forge':
@@ -419,81 +354,53 @@ class MinecraftThread(QThread):
             elif modloader_info['name'] == 'neoforge':
                 version = _NeoForgeVersion(modloader_info['version'], context=self.context)
             else:
-                # Fallback para Vanilla
                 version = Version(minecraft_version, context=self.context)
-            
-            # Autenticação
             if self.auth_session:
                 version.auth_session = self.auth_session
             else:
                 version.set_auth_offline(self.username, None)
-            
             self.status_update.emit("Instalando componentes...")
             self.progress_update.emit(75)
-            
             env = version.install()
-            
-            # CORREÇÃO: Configuração JVM melhorada
             self.status_update.emit("Configurando JVM...")
-            
-            # Verifica se é sistema 32-bit ou 64-bit
             is_64bit = platform.machine().endswith('64')
-            
-            # Configuração de RAM mais segura
             ram_mb = int(CONFIG['RAM_SIZE'].replace('M', ''))
-            if not is_64bit and ram_mb > 3072:  # Limita a 3GB em sistemas 32-bit
+            if not is_64bit and ram_mb > 3072:
                 ram_mb = 3072
                 self.status_update.emit("Sistema 32-bit detectado, limitando RAM a 3GB...")
-            
             ram_size = f"{ram_mb}M"
-            
-            # JVM args mais compatíveis
             jvm_args = [
                 f"-Xmx{ram_size}",
-                f"-Xms{min(512, ram_mb)}M",  # Xms menor que Xmx
+                f"-Xms{min(512, ram_mb)}M",
                 "-XX:+UseG1GC",
                 "-XX:+UnlockExperimentalVMOptions",
                 "-XX:G1NewSizePercent=20",
                 "-XX:G1ReservePercent=20",
                 "-XX:MaxGCPauseMillis=50",
                 "-XX:G1HeapRegionSize=32M",
-                "-Djava.awt.headless=false",  # Previne problemas de GUI
-                "-Dfile.encoding=UTF-8"  # Encoding correto
+                "-Djava.awt.headless=false",
+                "-Dfile.encoding=UTF-8"
             ]
-            
-            # Adiciona argumentos específicos para Windows
             if os.name == 'nt':
                 jvm_args.extend([
                     "-Dos.name=Windows 10",
                     "-Dos.version=10.0"
                 ])
-            
-            # CORREÇÃO: Aplicação correta dos argumentos JVM
             original_jvm_args = env.jvm_args.copy()
-            
-            # Mantém o executável Java original
             java_executable = original_jvm_args[0] if original_jvm_args else "java"
-            
-            # Remove argumentos conflitantes dos originais
             filtered_original_args = []
             for arg in original_jvm_args[1:]:
                 if not any(arg.startswith(prefix) for prefix in ['-Xmx', '-Xms', '-XX:+UseG1GC']):
                     filtered_original_args.append(arg)
-            
-            # Combina argumentos customizados com os originais filtrados
             env.jvm_args = [java_executable] + jvm_args + filtered_original_args
-            
             self.status_update.emit("Iniciando jogo...")
             self.progress_update.emit(100)
-            
             self.finished_success.emit()
             env.run()
-            
         except Exception as e:
-            # Log mais detalhado do erro
             import traceback
             error_msg = f"Erro: {str(e)}\nDetalhes: {traceback.format_exc()}"
-            print(error_msg)  # Log para debug
+            print(error_msg)
             self.error_occurred.emit(str(e))
     def _sync_mrpack(self):
         """Sincroniza o arquivo .mrpack e extrai seus conteúdos"""
@@ -560,61 +467,43 @@ class MinecraftThread(QThread):
             print(f"Erro na sincronização do mrpack: {e}")
             return False
     def _extract_mrpack(self, mrpack_path):
-        """Versão melhorada da extração com download paralelo"""
         try:
             temp_dir = self.game_dir / "temp_mrpack"
             if temp_dir.exists():
                 shutil.rmtree(temp_dir)
             temp_dir.mkdir()
-            
-            # Extrai o mrpack
             with zipfile.ZipFile(mrpack_path, 'r') as zip_ref:
                 zip_ref.extractall(temp_dir)
-            
             index_path = temp_dir / "modrinth.index.json"
             if not index_path.exists():
                 raise Exception("modrinth.index.json não encontrado no modpack")
-            
             with open(index_path, 'r', encoding='utf-8') as f:
                 self.mrpack_data = json.load(f)
-            
             files = self.mrpack_data.get('files', [])
             mods_dir = self.game_dir / "mods"
             mods_dir.mkdir(exist_ok=True)
-            
-            # Limpeza de mods antigos
             self.status_update.emit("Limpando mods antigos...")
             self.progress_update.emit(35)
             self._clean_old_mods(mods_dir, files)
-            
-            # Download paralelo
             self.status_update.emit("Baixando mods (paralelo)...")
             self.progress_update.emit(40)
-            
-            # Usa o novo sistema de download
             downloader = ModDownloader(self.game_dir, self.progress_update.emit)
             download_result = downloader.download_mods_parallel(files)
-            
             if not download_result['success']:
                 failed_count = len(download_result['failed_downloads'])
                 if failed_count > len(files) * 0.1:  # Mais de 10% falharam
                     raise Exception(f"Muitas falhas no download: {failed_count} arquivos")
                 else:
                     print(f"Download concluído com {failed_count} falhas menores")
-            
-            # Aplica overrides
             self.status_update.emit("Aplicando overrides...")
             self.progress_update.emit(55)
             self._apply_overrides(temp_dir)
-            
             shutil.rmtree(temp_dir)
             return True
-            
         except Exception as e:
             print(f"Erro na extração do mrpack: {e}")
             return False
     def _download_mod_file(self, file_info, base_dir):
-        """Baixa um arquivo de mod individual"""
         try:
             file_path = Path(file_info['path'])
             full_path = base_dir / file_path
@@ -693,43 +582,32 @@ class MinecraftThread(QThread):
                 restored.append(protected)
         return restored
     def _get_minecraft_version_from_mrpack(self):
-        """Obtém a versão do Minecraft do arquivo mrpack"""
         try:
             if not self.mrpack_data:
                 return None
-                
             dependencies = self.mrpack_data.get('dependencies', {})
             return dependencies.get('minecraft')
-            
         except Exception as e:
             print(f"Erro ao obter versão do Minecraft: {e}")
             return None
     def _get_modloader_from_mrpack(self):
-        """Obtém informações do modloader do arquivo mrpack"""
         try:
             if not self.mrpack_data:
                 return {'name': 'vanilla', 'version': None}
-                
             dependencies = self.mrpack_data.get('dependencies', {})
-            
-            # Verifica diferentes modloaders em ordem de prioridade
             modloaders = [
                 ('fabric-loader', 'fabric-loader'),
                 ('forge', 'forge'),
                 ('neoforge', 'neoforge'),
                 ('quilt-loader', 'quilt-loader')
             ]
-            
             for key, name in modloaders:
                 if key in dependencies:
                     return {
                         'name': name,
                         'version': dependencies[key]
                     }
-            
-            # Fallback para vanilla
             return {'name': 'vanilla', 'version': None}
-            
         except Exception as e:
             print(f"Erro ao obter modloader: {e}")
             return {'name': 'vanilla', 'version': None}
@@ -737,7 +615,6 @@ class MinecraftThread(QThread):
         try:
             backed_up = self.backup_protected_configs() if CONFIG_PROTECTION['enabled'] else []
             if backed_up: print(f"Backup de configs protegidas: {backed_up}")
-            
             override_dirs = ['overrides', 'client-overrides']
             for override_name in override_dirs:
                 override_path = temp_dir / override_name
@@ -746,24 +623,20 @@ class MinecraftThread(QThread):
                         if item.is_file():
                             relative_path = item.relative_to(override_path)
                             target_path = self.game_dir / relative_path
-                            
                             if is_protected_file(relative_path):
                                 print(f"Arquivo protegido ignorado: {relative_path}")
                                 continue
-                            
                             target_path.parent.mkdir(parents=True, exist_ok=True)
                             shutil.copy2(item, target_path)
-            
             if CONFIG_PROTECTION['enabled']:
                 restored = self.restore_protected_configs()
                 if restored: print(f"Configs restauradas: {restored}")
-                
         except Exception as e:
             print(f"Erro ao aplicar overrides: {e}")
 class MinecraftLauncher(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.game_dir = Path(os.getenv("APPDATA")) / ".minecraftbr"
+        self.game_dir = CONFIG['GameDir']
         self.game_dir.mkdir(exist_ok=True)
         self.auth_session = None
         self.username = None
@@ -773,7 +646,6 @@ class MinecraftLauncher(QMainWindow):
         self._pending_auth_email = None
         self.progress_timer = QTimer()
         self.current_progress = 0
-        
         self.init_ui()
         self.load_background()
     def init_ui(self):
@@ -1034,7 +906,6 @@ class MinecraftLauncher(QMainWindow):
         main_layout.addStretch()
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # Reposiciona o botão config
         self.config_btn.move(self.width() - 60, 20)
     def update_play_button_progress(self, progress, text=""):
         if progress == 0:
@@ -1162,7 +1033,6 @@ class MinecraftLauncher(QMainWindow):
             default_name = self.last_login_data['data'].get('username', os.getlogin())
         else:
             default_name = os.getlogin()
-            
         username, ok = QInputDialog.getText(self, "Login Offline", "Nome do jogador:", text=default_name)
         if ok and username.strip():
             self.username = username.strip()
@@ -1175,7 +1045,6 @@ class MinecraftLauncher(QMainWindow):
     def _start_auth(self, email):
         if self.auth_thread and self.auth_thread.isRunning():
             return
-            
         self.auth_thread = AuthThread(email)
         self.auth_thread.auth_success.connect(self._on_auth_success)
         self.auth_thread.auth_error.connect(self._on_auth_error)
@@ -1184,16 +1053,11 @@ class MinecraftLauncher(QMainWindow):
         self.auth_session = auth_session
         self.username = None
         username = getattr(auth_session, 'username', 'Usuário')
-        
         self.user_display.setText(f"{username} ({email})")
         self.user_display.setStyleSheet(self.user_display.styleSheet() + "color: #FFFFFF;")
         self.status_label.setText(f"Autenticado como {username}. Iniciando jogo...")
-        
         save_login_data(self.game_dir, 'microsoft', {'email': email, 'username': username})
-        
-        # Inicia o jogo automaticamente após autenticação bem-sucedida
         self.update_play_button_progress(10, "PREPARANDO...")
-        
         self.minecraft_thread = MinecraftThread(self.game_dir, self.auth_session, self.username)
         self.minecraft_thread.status_update.connect(self.status_label.setText)
         self.minecraft_thread.progress_update.connect(self.on_progress_update)
@@ -1202,46 +1066,35 @@ class MinecraftLauncher(QMainWindow):
         self.minecraft_thread.start()
     def _on_auth_error(self, error):
         self.play_btn.setEnabled(True)
-        self.update_play_button_progress(0)  # Reseta o botão
+        self.update_play_button_progress(0)
         self.status_label.setText(f"Erro na autenticação: {error}")
         QMessageBox.critical(self, "Erro", f"Erro no login: {error}")
     def on_play(self):
-        # Verifica se precisa fazer login primeiro
         selected_button = self.login_group.checkedButton()
         if not selected_button:
             QMessageBox.warning(self, "Aviso", "Selecione um tipo de login primeiro!")
             return
-        
         button_id = self.login_group.id(selected_button)
-        
-        # Se é último login Microsoft ou novo Microsoft, inicia autenticação
         if ((button_id == 0 and self.last_login_data and self.last_login_data['type'] == 'microsoft') or 
             (button_id == 1)):
-            
-            if not self.auth_session:  # Precisa autenticar
-                if button_id == 0:  # Último login
+            if not self.auth_session:
+                if button_id == 0:
                     email = self.last_login_data['data'].get('email', '')
                 else:  # Novo Microsoft
                     email = getattr(self, '_pending_auth_email', '')
-                
                 if not email:
                     QMessageBox.warning(self, "Erro", "Email não encontrado!")
                     return
-                
                 self.play_btn.setEnabled(False)
                 self.status_label.setText("Autenticando...")
                 self.update_play_button_progress(5, "AUTENTICANDO...")
                 self._start_auth(email)
                 return
-        
-        # Verificação final antes de iniciar
         if not self.auth_session and not self.username:
             QMessageBox.warning(self, "Aviso", "Configuração de login inválida!")
             return
-        
         self.play_btn.setEnabled(False)
         self.update_play_button_progress(5, "INICIANDO...")
-        
         self.minecraft_thread = MinecraftThread(self.game_dir, self.auth_session, self.username)
         self.minecraft_thread.status_update.connect(self.status_label.setText)
         self.minecraft_thread.progress_update.connect(self.on_progress_update)
