@@ -2,7 +2,7 @@ name: Build MinecraftBR Launcher
 on:
   push:
     branches: [main]
-    paths: ['minecraft.build.py']
+    paths: ['minecraft.build.py', '.github/workflows/build.yml']
   workflow_dispatch:
   release:
     types: [published]
@@ -19,7 +19,7 @@ jobs:
       - id: check
         run: |
           changed_files=$(git diff HEAD^ HEAD --name-only)
-          if [[ "$changed_files" == "minecraft.build.py" ]]; then
+          if echo "$changed_files" | grep -E "(minecraft\.build\.py|\.github/workflows/build\.yml)"; then
             echo "changed=true" >> $GITHUB_OUTPUT
           else
             echo "changed=false" >> $GITHUB_OUTPUT
@@ -47,12 +47,14 @@ jobs:
     needs: [check-changes, build]
     if: needs.check-changes.outputs.should-release == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - id: version
         run: echo "tag=v$(date +'%Y%m%d%H%M%S')" >> $GITHUB_OUTPUT
       - uses: actions/download-artifact@v4
-      - uses: softprops/action-gh-release@v1
+      - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: MinecraftBR Auto Release ${{ steps.version.outputs.tag }}
@@ -60,5 +62,3 @@ jobs:
             MinecraftBR-windows-latest/*
             MinecraftBR-ubuntu-latest/*
           generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
