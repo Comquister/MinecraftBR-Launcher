@@ -538,7 +538,6 @@ class MinecraftThread(QThread):
             print(f"Erro no download do arquivo {file_info.get('path', 'desconhecido')}: {e}")
             return False
     def _clean_old_mods(self, mods_dir, valid_files):
-        """Remove mods que não estão no modpack atual"""
         try:
             if not mods_dir.exists():
                 return
@@ -548,6 +547,15 @@ class MinecraftThread(QThread):
                 if file_path.startswith('mods/'):
                     mod_path = Path(file_path[5:])
                     valid_paths.add(mod_path)
+            temp_dir = self.game_dir / "temp_mrpack"
+            override_dirs = ['overrides', 'client-overrides']
+            for override_name in override_dirs:
+                override_mods_path = temp_dir / override_name / "mods"
+                if override_mods_path.exists():
+                    for override_mod in override_mods_path.rglob('*'):
+                        if override_mod.is_file():
+                            relative_path = override_mod.relative_to(override_mods_path)
+                            valid_paths.add(relative_path)
             for existing_file in mods_dir.rglob('*'):
                 if existing_file.is_file():
                     relative_path = existing_file.relative_to(mods_dir)
@@ -555,7 +563,7 @@ class MinecraftThread(QThread):
                         existing_file.unlink()
                         print(f"Removido: {relative_path}")
         except Exception as e:
-            print(f"Erro ao limpar mods antigos: {e}")  
+            print(f"Erro ao limpar mods antigos: {e}")
     def backup_protected_configs(self):
         backup_dir = self.game_dir / "config_backups"
         backup_dir.mkdir(exist_ok=True)
