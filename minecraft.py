@@ -57,7 +57,7 @@ CONFIG = {
     'PORTWEB': random.randint(49152, 65535)
 }
 CONFIG['REDIRECT_URI'] = f"http://localhost:{CONFIG['PORTWEB']}/code"
-CONFIG_PROTECTION = {'enabled': (CONFIG['GameDir'] / "options.txt").exists(), 'protected_files': ['config/distanthorizons.toml', 'options.txt']}
+CONFIG_PROTECTION = {'enabled': (CONFIG['GameDir'] / "options.txt").exists(), 'protected_files': ['config/distanthorizons.toml', 'options.txt', 'servers.dat']}
 auth_data = {'success': None, 'code': None, 'id_token': None}
 def save_login_data(game_dir, login_type, data):
     login_file = game_dir / "last_login.dat"
