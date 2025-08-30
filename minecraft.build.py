@@ -38,13 +38,13 @@ def perform_update(download_url):
     exe_name = os.path.basename(exe_path)
     exe_dir = os.path.dirname(exe_path)
     temp_exe = os.path.join(exe_dir, f"{exe_name}.new")
-    
+   
     if platform.system() == "Windows":
         try:
             resp = requests.get(download_url, timeout=30)
             with open(temp_exe, 'wb') as f: f.write(resp.content)
-            cmd = f'timeout /t 2 & del /f /q "{exe_path}" & move "{temp_exe}" "{exe_path}" & start "" "{exe_path}"'
-            os.system(f'start cmd /c "{cmd}"')
+            cmd = f'Start-Sleep 2; Remove-Item -Force \\"{exe_path}\\"; Move-Item \\"{temp_exe}\\" \\"{exe_path}\\"; Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show(\\"Atualização concluída! Você pode iniciar o aplicativo.\\", \\"Atualização\\", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)'
+            os.system(f'start powershell -WindowStyle Hidden -Command "{cmd}"')
         except: pass
     else:
         try:
@@ -52,7 +52,6 @@ def perform_update(download_url):
             with open(temp_exe, 'wb') as f: f.write(resp.content)
             os.system(f'sleep 3 & rm -f "{exe_path}" & mv "{temp_exe}" "{exe_path}" & chmod +x "{exe_path}" & "{exe_path}" &')
         except: pass
-    
     sys.exit(0)
 def check_update():
     logging.debug("Checking for updates...")
