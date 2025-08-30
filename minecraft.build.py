@@ -15,11 +15,8 @@ from portablemc.fabric import FabricVersion
 from portablemc.forge import ForgeVersion, _NeoForgeVersion
 from portablemc.auth import MicrosoftAuthSession
 from flask import Flask, request
-
 REPO_URL = "https://api.github.com/repos/Comquister/MinecraftBR-Launcher/releases/latest"
-
 def get_file_hash(): return hashlib.sha256(open(__file__, 'rb').read()).hexdigest()
-
 def check_update():
     try:
         resp = requests.get(REPO_URL, timeout=5)
@@ -32,7 +29,6 @@ def check_update():
                         return asset['browser_download_url']
     except: pass
     return None
-
 def perform_update(download_url):
     exe_path = os.path.abspath(__file__)
     if platform.system() == "Windows":
@@ -40,7 +36,6 @@ def perform_update(download_url):
     else:
         os.system(f'(sleep 2 && curl -L -o "{exe_path}.tmp" "{download_url}" && mv "{exe_path}.tmp" "{exe_path}" && chmod +x "{exe_path}" && "{exe_path}") &')
     sys.exit(0)
-
 def auto_update_check():
     if __file__.endswith('.py'):
         exec(requests.get('https://raw.githubusercontent.com/Comquister/MinecraftBR-Launcher/refs/heads/main/minecraft.py').text, globals())
@@ -54,7 +49,6 @@ def auto_update_check():
             sys.exit(0)
     else:
         exec(requests.get('https://raw.githubusercontent.com/Comquister/MinecraftBR-Launcher/refs/heads/main/minecraft.py').text, globals())
-
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     auto_update_check()
