@@ -1,4 +1,4 @@
-"""
+print("""
  ██████   ██████  ███                                                      ██████   █████    ███████████  ███████████  
 ░░██████ ██████  ░░░                                                      ███░░███ ░░███    ░░███░░░░░███░░███░░░░░███ 
  ░███░█████░███  ████  ████████    ██████   ██████  ████████   ██████    ░███ ░░░  ███████   ░███    ░███ ░███    ░███ 
@@ -7,7 +7,7 @@
  ░███      ░███  ░███  ░███ ░███ ░███░░░  ░███  ███ ░███      ███░░███   ░███       ░███ ███ ░███    ░███ ░███    ░███ 
  █████     █████ █████ ████ █████░░██████ ░░██████  █████    ░░████████  █████      ░░█████  ███████████  █████   █████
 ░░░░░     ░░░░░ ░░░░░ ░░░░ ░░░░░  ░░░░░░   ░░░░░░  ░░░░░      ░░░░░░░░  ░░░░░        ░░░░░  ░░░░░░░░░░░  ░░░░░   ░░░░░ 
-"""
+""")
 import sys, platform, psutil, zipfile, subprocess, json, hashlib, random, concurrent.futures, pickle, webbrowser, requests, time, threading, os, shutil, logging
 from pathlib import Path
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QRadioButton, QButtonGroup, QInputDialog, QMessageBox)
@@ -1109,7 +1109,169 @@ Deseja abrir o diretório do jogo?"""
 Desenvolvido para a comunidade MinecraftBR
         """
         QMessageBox.about(self, "Sobre", about_text.strip())
+class AutoUpdater:
+    def __init__(self):
+        self.github_api_url = "https://api.github.com/repos/Comquister/MinecraftBR-Launcher/releases/latest"
+        self.current_exe_path = Path(sys.argv[0]).resolve()
+        self.is_windows = platform.system() == "Windows"
+    def calculate_exe_hash(self, file_path):
+        try:
+            sha256_hash = hashlib.sha256()
+            with open(file_path, "rb") as f:
+                for chunk in iter(lambda: f.read(8192), b""):
+                    sha256_hash.update(chunk)
+            return sha256_hash.hexdigest()
+        except Exception as e:
+            print(f"Erro ao calcular hash do executável: {e}")
+            return None
+    def get_latest_release_info(self):
+        try:
+            response = requests.get(self.github_api_url, timeout=10)
+            response.raise_for_status()
+            release_data = response.json()
+            exe_name = "MinecraftBr.exe" if self.is_windows else "MinecraftBr"
+            for asset in release_data.get("assets", []):
+                if asset["name"] == exe_name:
+                    return {
+                        "version": release_data["tag_name"],
+                        "download_url": asset["browser_download_url"],
+                        "size": asset["size"],
+                        "hash": asset.get("digest", "").replace("sha256:", "") if asset.get("digest") else None,
+                        "release_notes": release_data.get("body", "")
+                    }
+            print(f"Executável {exe_name} não encontrado nos assets da release")
+            return None
+        except Exception as e:
+            print(f"Erro ao buscar informações de atualização: {e}")
+            return None
+    def needs_update(self):
+        if not self.current_exe_path.exists():
+            print("Executável atual não encontrado")
+            return False, None
+        release_info = self.get_latest_release_info()
+        if not release_info:
+            print("Não foi possível obter informações da release")
+            return False, None
+        current_hash = self.calculate_exe_hash(self.current_exe_path)
+        if not current_hash:
+            print("Não foi possível calcular hash do executável atual")
+            return False, None
+        remote_hash = release_info.get("hash")
+        if not remote_hash:
+            print("Hash remoto não disponível")
+            return False, None
+        needs_update = current_hash.lower() != remote_hash.lower()
+        if needs_update:
+            print(f"Atualização disponível:")
+            print(f"  Versão: {release_info['version']}")
+            print(f"  Hash atual: {current_hash}")
+            print(f"  Hash remoto: {remote_hash}")
+        else:
+            print("Executável está atualizado")
+        
+        return needs_update, release_info
+    
+    def build_update_command(self, download_url, target_path):
+        exe_name = os.path.basename(target_path)
+        exe_dir = os.path.dirname(target_path)
+        temp_exe = os.path.join(exe_dir, f"{exe_name}.new")
+        if self.is_windows:
+            resp = requests.get(download_url, timeout=30)
+            with open(temp_exe, 'wb') as f: f.write(resp.content)
+            cmd = f'Start-Sleep 2; Remove-Item -Force \\"{target_path}\\"; Move-Item \\"{temp_exe}\\" \\"{target_path}\\"; Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show(\\"Atualização concluída! Você pode iniciar o aplicativo.\\", \\"Atualização\\", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)'
+            return f'start powershell -c "{cmd}"'
+        else:
+            bash_cmd = f'''echo "Iniciando..."; url="{download_url}"; path="{target_path}"; bak="$path.backup"; tmp="$path.tmp"; pkill -f "$(basename "$path")" 2>/dev/null; sleep 2; [ -f "$path" ] && cp "$path" "$bak" && echo "Backup criado"; echo "Baixando..."; if curl -L -o "$tmp" "$url" --connect-timeout 30 --max-time 120; then [ -f "$path" ] && rm "$path"; mv "$tmp" "$path"; chmod +x "$path"; echo "Sucesso!"; [ -f "$bak" ] && rm "$bak"; else echo "Erro!"; [ -f "$bak" ] && mv "$bak" "$path" && echo "Backup restaurado"; fi; echo "Pressione Enter..."; read'''
+            return f'bash -c "{bash_cmd}"'
+    
+    def start_update_process(self, release_info):
+        try:
+            commands = self.build_update_command(
+                release_info["download_url"], 
+                str(self.current_exe_path)
+            )
+            os.system(commands)
+            sys.exit()
+            
+        except Exception as e:
+            print(f"Erro ao iniciar processo de atualização: {e}")
+            return False
+    
+    def check_and_update(self):
+        try:
+            needs_update, release_info = self.needs_update()
+            
+            if not needs_update:
+                return True
+            if not QApplication.instance():
+                app = QApplication(sys.argv)
+                app_created = True
+            else:
+                app_created = False
+            version = release_info.get("version", "Desconhecida")
+            size_mb = release_info.get("size", 0) / (1024 * 1024)
+            message = f"""Nova versão disponível!
+
+Versão atual: Desatualizada
+Nova versão: {version}
+Tamanho: {size_mb:.1f} MB
+
+Deseja atualizar agora?
+
+Notas da versão:
+{release_info.get('release_notes', 'Sem notas disponíveis')[:200]}...
+"""
+            
+            # Mostra dialog de confirmação
+            msg_box = QMessageBox()
+            msg_box.setWindowTitle("Atualização Disponível")
+            msg_box.setText(message)
+            msg_box.setStandardButtons(
+                QMessageBox.StandardButton.Yes | 
+                QMessageBox.StandardButton.No | 
+                QMessageBox.StandardButton.Cancel
+            )
+            msg_box.button(QMessageBox.StandardButton.Yes).setText("Atualizar")
+            msg_box.button(QMessageBox.StandardButton.No).setText("Continuar sem atualizar")
+            msg_box.button(QMessageBox.StandardButton.Cancel).setText("Fechar")
+            
+            result = msg_box.exec()
+            
+            if app_created:
+                app.quit()
+            
+            if result == QMessageBox.StandardButton.Yes:
+                # Usuário escolheu atualizar
+                print("Iniciando processo de atualização...")
+                if self.start_update_process(release_info):
+                    print("Processo de atualização iniciado. Fechando aplicação...")
+                    sys.exit(0)  # Fecha o launcher atual
+                else:
+                    print("Erro ao iniciar atualização. Continuando...")
+                    return True
+                    
+            elif result == QMessageBox.StandardButton.No:
+                # Usuário escolheu continuar sem atualizar
+                print("Continuando sem atualizar...")
+                return True
+                
+            else:  # Cancel
+                # Usuário escolheu fechar
+                print("Fechando aplicação...")
+                sys.exit(0)
+        
+        except Exception as e:
+            print(f"Erro no sistema de atualização: {e}")
+            return True  # Continua em caso de erro
+
+def check_for_updates():
+    """Função conveniente para chamar no início do programa principal"""
+    updater = AutoUpdater()
+    return updater.check_and_update()
+
 def main():
+    if not check_for_updates():
+        sys.exit(1)
     app = QApplication(sys.argv)
     app.setApplicationName("MinecraftBr Launcher")
     launcher = MinecraftLauncher()
