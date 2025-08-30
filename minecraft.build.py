@@ -25,11 +25,10 @@ def get_file_hash(path=None):
 def perform_update(download_url):
     exe_path = os.path.abspath(sys.argv[0])
     logging.debug(f"Performing update on {exe_path}, download URL: {download_url}")
-    if platform.system() == "Windows": os.system(f'start /B cmd /c "timeout /t 5 /nobreak >nul && curl -L -o "{exe_path}.tmp" "{download_url}" && move /Y "{exe_path}.tmp" "{exe_path}" && start "" "{exe_path}""')
+    if platform.system() == "Windows": os.system(f'start /B cmd /c "timeout /t 1 /nobreak >nul && taskkill /IM {os.path.basename(exe_path)} /F >nul 2>&1 && curl -L -o \"{exe_path}.tmp\" \"{download_url}\" && move /Y \"{exe_path}.tmp\" \"{exe_path}\" && start \"\" \"{exe_path}\""')
     else: os.system(f'(sleep 2 && curl -L -o "{exe_path}.tmp" "{download_url}" && mv -f "{exe_path}.tmp" "{exe_path}" && chmod +x "{exe_path}" && "{exe_path}") &')
     logging.debug("Exiting after update process...")
     sys.exit(0)
-    exit()
 def check_update():
     logging.debug("Checking for updates...")
     try:
