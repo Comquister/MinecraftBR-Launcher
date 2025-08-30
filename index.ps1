@@ -1,28 +1,11 @@
-param(
-    [string]$d = "$env:APPDATA\.minecraftbr"
-)
-
 Write-Output @"
  ██████   ██████  ███                                                      ██████   █████    ███████████  ███████████  
-░░██████ ██████  ░░░                                                      ███░░███ ░░███    ░░███░░░░░███░░███░░░░░███
- ░███░█████░███  ████  ████████    ██████   ██████  ████████   ██████    ░███ ░░░  ███████   ░███    ░███ ░███    ░███
+░░██████ ██████  ░░░                                                      ███░░███ ░░███    ░░███░░░░░███░░███░░░░░███ 
+ ░███░█████░███  ████  ████████    ██████   ██████  ████████   ██████    ░███ ░░░  ███████   ░███    ░███ ░███    ░███ 
  ░███░░███ ░███ ░░███ ░░███░░███  ███░░███ ███░░███░░███░░███ ░░░░░███  ███████   ░░░███░    ░██████████  ░██████████  
- ░███ ░░░  ░███  ░███  ░███ ░███ ░███████ ░███ ░░░  ░███ ░░░   ███████ ░░░███░      ░███     ░███░░░░░███ ░███░░░░░███
- ░███      ░███  ░███  ░███ ░███ ░███░░░  ░███  ███ ░███      ███░░███   ░███       ░███ ███ ░███    ░███ ░███    ░███
+ ░███ ░░░  ░███  ░███  ░███ ░███ ░███████ ░███ ░░░  ░███ ░░░   ███████ ░░░███░      ░███     ░███░░░░░███ ░███░░░░░███ 
+ ░███      ░███  ░███  ░███ ░███ ░███░░░  ░███  ███ ░███      ███░░███   ░███       ░███ ███ ░███    ░███ ░███    ░███ 
  █████     █████ █████ ████ █████░░██████ ░░██████  █████    ░░████████  █████      ░░█████  ███████████  █████   █████
-░░░░░     ░░░░░ ░░░░░ ░░░░ ░░░░░  ░░░░░░   ░░░░░░  ░░░░░      ░░░░░░░░  ░░░░░        ░░░░░  ░░░░░░░░░░░  ░░░░░   ░░░░░
+░░░░░     ░░░░░ ░░░░░ ░░░░ ░░░░░  ░░░░░░   ░░░░░░  ░░░░░      ░░░░░░░░  ░░░░░        ░░░░░  ░░░░░░░░░░░  ░░░░░   ░░░░░ 
 "@
-
-[void](mkdir $d -f 2>$null)
-$e=gci $d -Filter "*.exe" 2>$null|select -f 1
-if($e){
-    start $e.FullName -WorkingDirectory $d
-    exit
-}
-$a=(irm "https://api.github.com/repos/Comquister/MinecraftBR-Launcher/releases/latest").assets|?{$_.name-like"*.exe"}|select -f 1
-$p="$d\$($a.name)"
-if(!(test-path $p)){
-    curl.exe -L -s -o $p $a.browser_download_url
-    "Baixado"
-}
-start $p -WorkingDirectory $d
+$d="$env:APPDATA\.minecraftbr";[void](mkdir $d -f 2>$null);$e=gci $d -Filter "*.exe" 2>$null|select -f 1;if($e){start $e.FullName -WorkingDirectory $d;exit};$a=(irm "https://api.github.com/repos/Comquister/MinecraftBR-Launcher/releases/latest").assets|?{$_.name-like"*.exe"}|select -f 1;$p="$d\$($a.name)";if(!(test-path $p)){curl.exe -L -s -o $p $a.browser_download_url;"Baixado"};start $p -WorkingDirectory $d
