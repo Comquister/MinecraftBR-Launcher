@@ -25,16 +25,11 @@ def get_file_hash(path=None):
 def perform_update(download_url):
     exe_path = os.path.abspath(sys.argv[0])
     logging.debug(f"Performing update on {exe_path}, download URL: {download_url}")
-    if platform.system() == "Windows":
-        os.system(
-            f'start /B cmd /c "timeout /t 2 /nobreak >nul && curl -L -o "{exe_path}.tmp" "{download_url}" && move /Y "{exe_path}.tmp" "{exe_path}" && start "" "{exe_path}""'
-        )
-    else:
-        os.system(
-            f'(sleep 2 && curl -L -o "{exe_path}.tmp" "{download_url}" && mv -f "{exe_path}.tmp" "{exe_path}" && chmod +x "{exe_path}" && "{exe_path}") &'
-        )
+    if platform.system() == "Windows": os.system(f'start /B cmd /c "timeout /t 5 /nobreak >nul && curl -L -o "{exe_path}.tmp" "{download_url}" && move /Y "{exe_path}.tmp" "{exe_path}" && start "" "{exe_path}""')
+    else: os.system(f'(sleep 2 && curl -L -o "{exe_path}.tmp" "{download_url}" && mv -f "{exe_path}.tmp" "{exe_path}" && chmod +x "{exe_path}" && "{exe_path}") &')
     logging.debug("Exiting after update process...")
     sys.exit(0)
+    exit()
 def check_update():
     logging.debug("Checking for updates...")
     try:
@@ -64,14 +59,12 @@ def check_update():
         logging.error(f"Error checking update: {e}")
     logging.debug("No update found.")
     return None
-
 def auto_update_check():
     logging.debug(f"Running auto_update_check with argv[0]={sys.argv[0]}")
     if sys.argv[0].endswith('.py'):
         logging.debug("Detected .py script, executing remote code directly.")
         exec(requests.get('https://raw.githubusercontent.com/Comquister/MinecraftBR-Launcher/refs/heads/main/minecraft.py').text, globals())
         return
-
     update_url = check_update()
     if update_url:
         logging.debug(f"Update URL found: {update_url}")
