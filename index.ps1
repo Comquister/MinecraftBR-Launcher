@@ -9,8 +9,6 @@ Write-Output @"
 ░░░░░     ░░░░░ ░░░░░ ░░░░ ░░░░░  ░░░░░░   ░░░░░░  ░░░░░      ░░░░░░░░  ░░░░░        ░░░░░  ░░░░░░░░░░░  ░░░░░   ░░░░░
 "@
 
-param([switch]$atalho, [switch]$nostart)
-
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
