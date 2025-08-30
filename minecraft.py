@@ -280,37 +280,53 @@ class AuthThread(QThread):
     
     def run(self):
         try:
-            auth_data.update({'success': None, 'code': None, 'id_token': None})
+            self.game_dir.mkdir(exist_ok=True)
             
-            nonce = str(int(time.time() * 1000))
-            auth_url = MicrosoftAuthSession.get_authentication_url(
-                CONFIG['CLIENT_ID'], CONFIG['REDIRECT_URI'], self.email, nonce
-            )
+            self.status_update.emit("Verificando modpack...")
+            self.progress_update.emit(5)
             
-            # Inicia servidor Flask
-            app = create_auth_app()
-            threading.Thread(target=lambda: app.run(
-                host='localhost', port=CONFIG['PORTWEB'], debug=False
-            ), daemon=True).start()
+            if not self._sync_mrpack():
+                raise Exception("Falha na sincronização do modpack")
+                
+            minecraft_version = self._get_minecraft_version_from_mrpack()
+            modloader_info = self._get_modloader_from_mrpack()
             
+            if not minecraft_version:
+                raise Exception("Versão do Minecraft não encontrada")
+                
+            print(f"Iniciando {minecraft_version} com {modloader_info['name']}")
+            
+            self.status_update.emit(f"Preparando {minecraft_version}...")
+            self.progress_update.emit(60)
+            
+            # Criação da versão com timeout
+            version = self._create_version(minecraft_version, modloader_info)
+            
+            self.status_update.emit("Instalando componentes...")
+            self.progress_update.emit(75)
+            
+            # Instalação com timeout
+            env = self._install_with_timeout(version)
+            
+            self.status_update.emit("Configurando JVM...")
+            self._configure_jvm(env)
+            
+            self.status_update.emit("Iniciando jogo...")
+            self.progress_update.emit(95)
+            
+            print("Tudo pronto - iniciando Minecraft...")
+            self.finished_success.emit()
+            
+            # Pequena pausa antes de iniciar
             time.sleep(1)
-            webbrowser.open(auth_url)
+            env.run()
             
-            # Aguarda resposta
-            timeout = time.time() + 180
-            while auth_data['success'] is None and time.time() < timeout:
-                time.sleep(0.5)
-            
-            if auth_data['success'] and MicrosoftAuthSession.check_token_id(auth_data['id_token'], self.email, nonce):
-                auth_session = MicrosoftAuthSession.authenticate(
-                    CONFIG['CLIENT_ID'], CONFIG['CLIENT_ID'], auth_data['code'], CONFIG['REDIRECT_URI']
-                )
-                auth_session.email = self.email
-                self.auth_success.emit(auth_session, self.email)
-            else:
-                self.auth_error.emit("Falha na autenticação")
         except Exception as e:
-            self.auth_error.emit(str(e))
+            import traceback
+            error_msg = f"Erro: {str(e)}\nDetalhes: {traceback.format_exc()}"
+            print(f"ERRO CRÍTICO: {error_msg}")
+            self.error_occurred.emit(str(e))
+
 class MinecraftThread(QThread):
     status_update = pyqtSignal(str)
     progress_update = pyqtSignal(int)
@@ -393,6 +409,103 @@ class MinecraftThread(QThread):
             error_msg = f"Erro: {str(e)}\nDetalhes: {traceback.format_exc()}"
             print(error_msg)
             self.error_occurred.emit(str(e))
+    def _create_version(self, minecraft_version, modloader_info):
+        try:
+            if modloader_info['name'] == 'fabric-loader':
+                version = FabricVersion.with_fabric(minecraft_version, modloader_info['version'], context=self.context)
+            elif modloader_info['name'] == 'forge':
+                version = ForgeVersion(f"{minecraft_version}-{modloader_info['version']}", context=self.context)
+            elif modloader_info['name'] == 'neoforge':
+                version = _NeoForgeVersion(modloader_info['version'], context=self.context)
+            else:
+                version = Version(minecraft_version, context=self.context)
+                
+            # Configurar autenticação
+            if self.auth_session:
+                version.auth_session = self.auth_session
+            else:
+                version.set_auth_offline(self.username, None)
+                
+            return version
+            
+        except Exception as e:
+            print(f"Erro ao criar versão: {e}")
+            raise e
+    def _install_with_timeout(self, version):
+        try:
+            # Timeout de 5 minutos para instalação
+            import signal
+            
+            def timeout_handler(signum, frame):
+                raise TimeoutError("Timeout na instalação do Minecraft")
+                
+            if hasattr(signal, 'SIGALRM'):  # Unix/Linux
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(300)  # 5 minutos
+                
+            env = version.install()
+            
+            if hasattr(signal, 'SIGALRM'):
+                signal.alarm(0)  # Cancela timeout
+                
+            return env
+            
+        except TimeoutError:
+            print("Timeout na instalação - processo pode estar travado")
+            raise Exception("Timeout na instalação do Minecraft")
+        except Exception as e:
+            print(f"Erro na instalação: {e}")
+            raise e
+    def _configure_jvm(self, env):
+        try:
+            is_64bit = platform.machine().endswith('64')
+            ram_mb = int(CONFIG['RAM_SIZE'].replace('M', ''))
+            
+            if not is_64bit and ram_mb > 3072:
+                ram_mb = 3072
+                print("Sistema 32-bit - RAM limitada a 3GB")
+                
+            ram_size = f"{ram_mb}M"
+            
+            # Argumentos JVM otimizados
+            jvm_args = [
+                f"-Xmx{ram_size}",
+                f"-Xms{min(512, ram_mb)}M",
+                "-XX:+UseG1GC",
+                "-XX:+UnlockExperimentalVMOptions",
+                "-XX:G1NewSizePercent=20",
+                "-XX:G1ReservePercent=20",
+                "-XX:MaxGCPauseMillis=50",
+                "-XX:G1HeapRegionSize=32M",
+                "-Djava.awt.headless=false",
+                "-Dfile.encoding=UTF-8",
+                "-XX:+DisableExplicitGC"  # Previne GC explícito
+            ]
+            
+            if os.name == 'nt':
+                jvm_args.extend([
+                    "-Dos.name=Windows 10",
+                    "-Dos.version=10.0"
+                ])
+                
+            # Preservar Java executable
+            original_args = env.jvm_args.copy()
+            java_executable = original_args[0] if original_args else "java"
+            
+            # Filtrar argumentos conflitantes
+            filtered_args = []
+            skip_prefixes = ['-Xmx', '-Xms', '-XX:+UseG1GC']
+            
+            for arg in original_args[1:]:
+                if not any(arg.startswith(prefix) for prefix in skip_prefixes):
+                    filtered_args.append(arg)
+                    
+            env.jvm_args = [java_executable] + jvm_args + filtered_args
+            print(f"JVM configurada: {ram_size} RAM")
+            
+        except Exception as e:
+            print(f"Erro na configuração JVM: {e}")
+            raise e
     def _sync_mrpack(self):
         """Sincroniza o arquivo .mrpack e extrai seus conteúdos"""
         try:
@@ -614,7 +727,10 @@ class MinecraftThread(QThread):
         try:
             backed_up = self.backup_protected_configs() if CONFIG_PROTECTION['enabled'] else []
             if backed_up: print(f"Backup de configs protegidas: {backed_up}")
+            
             override_dirs = ['overrides', 'client-overrides']
+            files_applied = 0
+            
             for override_name in override_dirs:
                 override_path = temp_dir / override_name
                 if override_path.exists() and override_path.is_dir():
@@ -622,16 +738,28 @@ class MinecraftThread(QThread):
                         if item.is_file():
                             relative_path = item.relative_to(override_path)
                             target_path = self.game_dir / relative_path
+                            
                             if is_protected_file(relative_path):
                                 print(f"Arquivo protegido ignorado: {relative_path}")
                                 continue
+                                
                             target_path.parent.mkdir(parents=True, exist_ok=True)
                             shutil.copy2(item, target_path)
+                            files_applied += 1
+            
+            print(f"Aplicados {files_applied} arquivos de override")
+            
             if CONFIG_PROTECTION['enabled']:
                 restored = self.restore_protected_configs()
                 if restored: print(f"Configs restauradas: {restored}")
+                
+            # IMPORTANTE: Emitir sinal de progresso após completar
+            self.progress_update.emit(58)
+            print("Overrides aplicados com sucesso - continuando...")
+            
         except Exception as e:
             print(f"Erro ao aplicar overrides: {e}")
+            raise e  # Re-propaga o erro
 class MinecraftLauncher(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1052,45 +1180,69 @@ class MinecraftLauncher(QMainWindow):
         self.status_label.setText(f"Erro na autenticação: {error}")
         QMessageBox.critical(self, "Erro", f"Erro no login: {error}")
     def on_play(self):
+        # Verificar se já existe thread rodando
+        if self.minecraft_thread and self.minecraft_thread.isRunning():
+            print("Processo já em andamento...")
+            return
+            
         selected_button = self.login_group.checkedButton()
         if not selected_button:
             QMessageBox.warning(self, "Aviso", "Selecione um tipo de login primeiro!")
             return
+            
         button_id = self.login_group.id(selected_button)
-        if ((button_id == 0 and self.last_login_data and self.last_login_data['type'] == 'microsoft') or 
-            (button_id == 1)):
+        
+        # Reset do estado
+        self.current_progress = 0
+        
+        # Lógica de autenticação...
+        if ((button_id == 0 and self.last_login_data and self.last_login_data['type'] == 'microsoft') or (button_id == 1)):
             if not self.auth_session:
-                if button_id == 0:
-                    email = self.last_login_data['data'].get('email', '')
-                else:  # Novo Microsoft
-                    email = getattr(self, '_pending_auth_email', '')
+                email = self.last_login_data['data'].get('email', '') if button_id == 0 else getattr(self, '_pending_auth_email', '')
                 if not email:
                     QMessageBox.warning(self, "Erro", "Email não encontrado!")
                     return
+                    
                 self.play_btn.setEnabled(False)
                 self.status_label.setText("Autenticando...")
                 self.update_play_button_progress(5, "AUTENTICANDO...")
                 self._start_auth(email)
                 return
+                
         if not self.auth_session and not self.username:
             QMessageBox.warning(self, "Aviso", "Configuração de login inválida!")
             return
+            
+        print(f"Iniciando com auth_session={bool(self.auth_session)}, username={self.username}")
+        
         self.play_btn.setEnabled(False)
         self.update_play_button_progress(5, "INICIANDO...")
+        
         self.minecraft_thread = MinecraftThread(self.game_dir, self.auth_session, self.username)
         self.minecraft_thread.status_update.connect(self.status_label.setText)
         self.minecraft_thread.progress_update.connect(self.on_progress_update)
         self.minecraft_thread.error_occurred.connect(self._on_minecraft_error)
-        self.minecraft_thread.finished_success.connect(self.close)
+        self.minecraft_thread.finished_success.connect(self._on_minecraft_success)
         self.minecraft_thread.start()
+    def _on_minecraft_success(self):
+        print("Minecraft iniciado com sucesso - fechando launcher")
+        self.close()
     def on_progress_update(self, progress):
         self.current_progress = progress
         self.update_play_button_progress(progress)
     def _on_minecraft_error(self, error):
-        self.status_label.setText("Erro ao iniciar")
-        self.update_play_button_progress(0)  # Reseta o botão
+        print(f"Erro reportado pela thread: {error}")
+        self.status_label.setText(f"Erro: {error}")
+        self.update_play_button_progress(0)
         self.play_btn.setEnabled(True)
-        QMessageBox.critical(self, "Erro", f"Erro: {error}")
+        
+        # Cleanup da thread
+        if self.minecraft_thread:
+            self.minecraft_thread.quit()
+            self.minecraft_thread.wait(5000)  # Aguarda 5s
+            self.minecraft_thread = None
+            
+        QMessageBox.critical(self, "Erro", f"Falha ao iniciar Minecraft:\n{error}")
     def on_config(self):
         game_dir_str = str(self.game_dir)
         
