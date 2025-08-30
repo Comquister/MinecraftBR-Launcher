@@ -2,7 +2,7 @@ name: Build MinecraftBR Launcher
 on:
   push:
     branches: [main]
-    paths: ['minecraft.build.py', '.github/workflows/build.yml']
+    paths: ['minecraft.py', '.github/workflows/build.yml']
   workflow_dispatch:
   release:
     types: [published]
