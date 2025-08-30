@@ -8,10 +8,9 @@ print("""
  █████     █████ █████ ████ █████░░██████ ░░██████  █████    ░░████████  █████      ░░█████  ███████████  █████   █████
 ░░░░░     ░░░░░ ░░░░░ ░░░░ ░░░░░  ░░░░░░   ░░░░░░  ░░░░░      ░░░░░░░░  ░░░░░        ░░░░░  ░░░░░░░░░░░  ░░░░░   ░░░░░ 
 """)
-
 import sys, platform, psutil, zipfile, subprocess, json, hashlib, random, concurrent.futures, pickle, webbrowser, requests, time, threading, os, shutil, logging, atexit
 from pathlib import Path
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QRadioButton, QButtonGroup, QInputDialog, QMessageBox)
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QRadioButton, QButtonGroup, QInputDialog, QMessageBox
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QPixmap, QPalette, QBrush, QIcon
 from portablemc.standard import Version, Context
@@ -21,89 +20,108 @@ from portablemc.auth import MicrosoftAuthSession
 from flask import Flask, request
 
 REPO_URL = "https://api.github.com/repos/Comquister/MinecraftBR-Launcher/releases/latest"
-logging.basicConfig(level=logging.DEBUG, format='[%(levelname)s] %(message)s')
-def get_file_hash(path=None):
-    if path is None:
-        path = os.path.abspath(sys.argv[0])
+UPDATE_CHECK_INTERVAL = 24 * 3600
+
+logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
+
+def get_app_version():
     try:
-        with open(path, "rb") as f:
-            h = hashlib.sha256(f.read()).hexdigest()
-        logging.debug(f"File hash for {path}: {h}")
-        return h
-    except Exception as e:
-        logging.error(f"Failed to hash {path}: {e}")
-        return None
-def perform_update(download_url):
-    exe_path = os.path.abspath(sys.argv[0])
-    exe_name = os.path.basename(exe_path)
-    exe_dir = os.path.dirname(exe_path)
-    temp_exe = os.path.join(exe_dir, f"{exe_name}.new")
-   
-    if platform.system() == "Windows":
-        try:
-            resp = requests.get(download_url, timeout=30)
-            with open(temp_exe, 'wb') as f: f.write(resp.content)
-            cmd = f'Start-Sleep 2; Remove-Item -Force \\"{exe_path}\\"; Move-Item \\"{temp_exe}\\" \\"{exe_path}\\"; Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show(\\"Atualização concluída! Você pode iniciar o aplicativo.\\", \\"Atualização\\", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)'
-            os.system(f'start powershell -WindowStyle Hidden -Command "{cmd}"')
-        except: pass
-    else:
-        try:
-            resp = requests.get(download_url, timeout=30)
-            with open(temp_exe, 'wb') as f: f.write(resp.content)
-            os.system(f'sleep 3 & rm -f "{exe_path}" & mv "{temp_exe}" "{exe_path}" & chmod +x "{exe_path}" & "{exe_path}" &')
-        except: pass
-    sys.exit(0)
-def check_update():
-    logging.debug("Checking for updates...")
+        exe_path = sys.argv[0] if sys.argv else sys.executable
+        file_hash = hashlib.sha256(open(exe_path, 'rb').read()).hexdigest()[:8]
+        response = requests.get(REPO_URL, headers={'User-Agent': f'MinecraftBR-Launcher'}, timeout=10)
+        if response.status_code == 200:
+            release_data = response.json()
+            return release_data.get('tag_name', '').replace('v', '') or f"dev-{file_hash}"
+        return f"dev-{file_hash}"
+    except:
+        return "dev-unknown"
+
+APP_VERSION = get_app_version()
+
+def calculate_file_checksum(filepath):
+    if not os.path.exists(filepath): return None
+    try: return hashlib.sha256(open(filepath, "rb").read()).hexdigest()
+    except Exception as e: logger.error(f"Erro ao calcular checksum: {e}"); return None
+
+def download_file_safely(url, destination, chunk_size=8192):
     try:
-        resp = requests.get(REPO_URL, timeout=5)
-        logging.debug(f"GitHub API response status: {resp.status_code}")
-        if resp.status_code == 200:
-            latest = resp.json()
-            system = platform.system().lower()
-            logging.debug(f"Detected OS: {system}")
-            for asset in latest['assets']:
-                name = asset['name']
-                logging.debug(f"Found asset: {name}")
-                if system == "windows" and name.lower().endswith(".exe"):
-                    target_asset = asset
-                elif system == "linux" and (name.lower() == "minecraftbr" or name.lower().endswith(".bin")):
-                    target_asset = asset
-                else:
-                    continue
-                file_resp = requests.get(target_asset['browser_download_url'])
-                remote_hash = hashlib.sha256(file_resp.content).hexdigest()
-                logging.debug(f"Remote hash: {remote_hash}")
-                local_hash = get_file_hash()
-                if local_hash != remote_hash:
-                    logging.debug("Update available!")
-                    return target_asset['browser_download_url']
-    except Exception as e:
-        logging.error(f"Error checking update: {e}")
-    logging.debug("No update found.")
-    return None
-def auto_update_check():
-    logging.debug(f"Running auto_update_check with argv[0]={sys.argv[0]}")
-    if sys.argv[0].endswith('.py'):
-        logging.debug("Detected .py script, executing remote code directly.")
-        exec(requests.get('https://raw.githubusercontent.com/Comquister/MinecraftBR-Launcher/refs/heads/main/minecraft.py').text, globals())
-        return
-    update_url = check_update()
-    if update_url:
-        logging.debug(f"Update URL found: {update_url}")
-        reply = QMessageBox.question(None, "Atualização", "Nova versão disponível! Atualizar?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        if reply == QMessageBox.StandardButton.Yes:
-            perform_update(update_url)
-        else:
-            logging.debug("User chose not to update. Exiting...")
+        response = requests.get(url, stream=True, timeout=30, headers={'User-Agent': f'MinecraftBR-Launcher/{APP_VERSION}'})
+        response.raise_for_status()
+        with open(destination, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=chunk_size):
+                if chunk: f.write(chunk)
+        return True
+    except Exception as e: logger.error(f"Erro no download: {e}"); return False
+
+def check_for_updates():
+    try:
+        headers = {'User-Agent': f'MinecraftBR-Launcher/{APP_VERSION}', 'Accept': 'application/vnd.github.v3+json'}
+        response = requests.get(REPO_URL, headers=headers, timeout=10)
+        if response.status_code != 200: return None
+        release_data = response.json()
+        latest_version = release_data.get('tag_name', '').replace('v', '')
+        return release_data if latest_version > APP_VERSION else None
+    except Exception as e: logger.warning(f"Falha na verificação de atualização: {e}"); return None
+
+def perform_safe_update(download_url):
+    current_exe = sys.executable if getattr(sys, 'frozen', False) else __file__
+    backup_path, temp_path = f"{current_exe}.backup", f"{current_exe}.temp"
+    try:
+        shutil.copy2(current_exe, backup_path)
+        if download_file_safely(download_url, temp_path):
+            if platform.system() == "Windows":
+                batch_content = f'@echo off\ntimeout /t 3 /nobreak >nul\nmove "{temp_path}" "{current_exe}"\nstart "" "{current_exe}"\ndel "%~f0"'
+                open("update.bat", "w").write(batch_content); subprocess.Popen(["update.bat"], shell=True)
+            else:
+                os.chmod(temp_path, 0o755)
+                script_content = f'#!/bin/bash\nsleep 3\nmv "{temp_path}" "{current_exe}"\nchmod +x "{current_exe}"\n"{current_exe}" &\nrm "$0"'
+                open("update.sh", "w").write(script_content); os.chmod("update.sh", 0o755); subprocess.Popen(["./update.sh"])
             sys.exit(0)
-    else:
-        logging.debug("No updates, executing remote code.")
-        exec(requests.get('https://raw.githubusercontent.com/Comquister/MinecraftBR-Launcher/refs/heads/main/minecraft.py').text, globals())
+    except Exception as e: logger.error(f"Falha na atualização: {e}"); os.path.exists(backup_path) and shutil.move(backup_path, current_exe)
+
+def download_and_execute_remote():
+    remote_url = "https://raw.githubusercontent.com/Comquister/MinecraftBR-Launcher/refs/heads/main/minecraft.py"
+    try:
+        response = requests.get(remote_url, headers={'User-Agent': f'MinecraftBR-Launcher/{APP_VERSION}'}, timeout=15)
+        response.raise_for_status()
+        remote_code = response.text
+        if len(remote_code) > 100 and 'import' in remote_code: logger.info("Executando código remoto do GitHub"); exec(remote_code, globals())
+        else: logger.error("Código remoto inválido, usando versão local"); run_local_version()
+    except Exception as e: logger.error(f"Falha ao baixar código remoto: {e}"); run_local_version()
+
+def run_local_version():
+    logger.info("Executando versão local")
+    window = SecureLauncher()
+    window.show()
+
+def safe_startup(): download_and_execute_remote()
+
+class SecureLauncher(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle(f"MinecraftBR Launcher v{APP_VERSION}")
+        self.setMinimumSize(800, 600)
+        self.setup_ui()
+        
+    def setup_ui(self):
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        layout = QVBoxLayout(central_widget)
+        title_label = QLabel("MinecraftBR Launcher")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title_label.setStyleSheet("font-size: 24px; font-weight: bold; margin: 20px;")
+        layout.addWidget(title_label)
+        start_button = QPushButton("Iniciar Minecraft")
+        start_button.setMinimumHeight(50)
+        start_button.clicked.connect(self.start_game)
+        layout.addWidget(start_button)
+        
+    def start_game(self): logger.info("Iniciando Minecraft...")
 
 if __name__ == "__main__":
-    logging.debug("Starting QApplication...")
     app = QApplication(sys.argv)
-    auto_update_check()
-    logging.debug("Starting Qt event loop...")
+    app.setApplicationName("MinecraftBR Launcher")
+    app.setApplicationVersion(APP_VERSION)
+    safe_startup()
     sys.exit(app.exec())
