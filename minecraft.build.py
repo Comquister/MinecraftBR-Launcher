@@ -43,7 +43,8 @@ def perform_update(download_url):
         try:
             resp = requests.get(download_url, timeout=30)
             with open(temp_exe, 'wb') as f: f.write(resp.content)
-            os.system(f'timeout /t 2 & del /f /q "{exe_path}" & move "{temp_exe}" "{exe_path}" & start "" "{exe_path}"')
+            cmd = f'timeout /t 2 & del /f /q "{exe_path}" & move "{temp_exe}" "{exe_path}" & start "" "{exe_path}"'
+            os.system(f'start cmd /c "{cmd}"')
         except: pass
     else:
         try:
