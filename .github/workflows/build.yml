@@ -19,7 +19,7 @@ jobs:
       - id: check
         run: |
           changed_files=$(git diff HEAD^ HEAD --name-only)
-          if echo "$changed_files" | grep -E "(minecraft  \.py|\.github/workflows/build\.yml)"; then
+          if echo "$changed_files" | grep -E "(minecraft\.py|\.github/workflows/build\.yml)"; then
             echo "changed=true" >> $GITHUB_OUTPUT
           else
             echo "changed=false" >> $GITHUB_OUTPUT
