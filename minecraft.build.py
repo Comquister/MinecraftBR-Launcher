@@ -57,5 +57,5 @@ def auto_update_check():
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    QTimer.singleShot(1000, auto_update_check)
+    auto_update_check()
     sys.exit(app.exec())
