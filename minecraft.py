@@ -729,6 +729,21 @@ class MinecraftLauncher(QMainWindow):
             }
         """)
         self.config_btn.clicked.connect(self.on_config)
+        self.atalho = QPushButton("🏷️", self)
+        self.atalho.setFixedSize(40, 40)
+        self.atalho.move(20, 20)
+        self.atalho.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(0, 0, 0, 0.3);
+                border: 1px solid rgba(255, 255, 255, 0.3);
+                border-radius: 20px;
+                font-size: 16px;
+            }
+            QPushButton:hover {
+                background-color: rgba(0, 0, 0, 0.5);
+            }
+        """)
+        self.atalho.clicked.connect(self.on_atalho)
         main_layout.addStretch()
         self.logo = QLabel()
         self.logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1098,6 +1113,22 @@ Deseja abrir o diretório do jogo?"""
                     subprocess.run(['xdg-open', game_dir_str])
             except Exception as e:
                 QMessageBox.critical(self, "Erro", f"Erro ao abrir diretório: {e}")
+    def on_atalho(self):
+        reply = QMessageBox.question(self, "Criar Atalho", "Deseja criar um atalho na área de trabalho?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                if os.name == 'nt':
+                    ps_cmd = f'$WshShell = New-Object -comObject WScript.Shell; $Shortcut = $WshShell.CreateShortcut("$([Environment]::GetFolderPath(\'Desktop\'))\\MinecraftBr.lnk"); $Shortcut.TargetPath = "{sys.argv[0]}"; $Shortcut.WorkingDirectory = "{os.path.dirname(sys.argv[0])}"; $Shortcut.Save()'
+                    subprocess.run(['powershell', '-Command', ps_cmd], check=True)
+                else:
+                    desktop = os.path.join(os.path.expanduser('~'), 'Desktop')
+                    shortcut_path = os.path.join(desktop, 'Launcher.desktop')
+                    with open(shortcut_path, 'w') as f:
+                        f.write(f"[Desktop Entry]\nType=Application\nName=Launcher\nExec=python {sys.argv[0]}\nPath={os.path.dirname(sys.argv[0])}\nTerminal=false")
+                    os.chmod(shortcut_path, 0o755)
+                QMessageBox.information(self, "Sucesso", "Atalho criado na área de trabalho!")
+            except Exception as e:
+                QMessageBox.critical(self, "Erro", f"Erro ao criar atalho: {e}")
     def on_about(self):
         about_text = f"""
 {CONFIG['Title']}
@@ -1221,57 +1252,43 @@ Deseja atualizar agora?
 Notas da versão:
 {release_info.get('release_notes', 'Sem notas disponíveis')[:200]}...
 """
-            
-            # Mostra dialog de confirmação
             msg_box = QMessageBox()
             msg_box.setWindowTitle("Atualização Disponível")
             msg_box.setText(message)
-            msg_box.setStandardButtons(
-                QMessageBox.StandardButton.Yes | 
-                QMessageBox.StandardButton.No | 
-                QMessageBox.StandardButton.Cancel
-            )
+            msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel)
             msg_box.button(QMessageBox.StandardButton.Yes).setText("Atualizar")
             msg_box.button(QMessageBox.StandardButton.No).setText("Continuar sem atualizar")
             msg_box.button(QMessageBox.StandardButton.Cancel).setText("Fechar")
-            
             result = msg_box.exec()
-            
             if app_created:
                 app.quit()
-            
             if result == QMessageBox.StandardButton.Yes:
-                # Usuário escolheu atualizar
                 print("Iniciando processo de atualização...")
                 if self.start_update_process(release_info):
                     print("Processo de atualização iniciado. Fechando aplicação...")
-                    sys.exit(0)  # Fecha o launcher atual
+                    sys.exit(0)
                 else:
                     print("Erro ao iniciar atualização. Continuando...")
                     return True
                     
             elif result == QMessageBox.StandardButton.No:
-                # Usuário escolheu continuar sem atualizar
                 print("Continuando sem atualizar...")
                 return True
                 
-            else:  # Cancel
-                # Usuário escolheu fechar
+            else:
                 print("Fechando aplicação...")
                 sys.exit(0)
         
         except Exception as e:
             print(f"Erro no sistema de atualização: {e}")
-            return True  # Continua em caso de erro
-
+            return True
 def check_for_updates():
-    """Função conveniente para chamar no início do programa principal"""
     updater = AutoUpdater()
     return updater.check_and_update()
-
 def main():
-    if not check_for_updates():
-        sys.exit(1)
+    if not sys.argv[0].endswith(".py"):
+        if not check_for_updates():
+            sys.exit(1)
     app = QApplication(sys.argv)
     app.setApplicationName("MinecraftBr Launcher")
     launcher = MinecraftLauncher()
