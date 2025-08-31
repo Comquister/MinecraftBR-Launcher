@@ -91,7 +91,7 @@ jobs:
                 [
                 StringTable(
                   u'040904B0',
-                  [StringStruct(u'CompanyName', u'Conquister'),
+                  [StringStruct(u'CompanyName', u'MinecraftBR Project'),
                   StringStruct(u'FileDescription', u'MinecraftBR Launcher - Launcher personalizado para Minecraft'),
                   StringStruct(u'FileVersion', u'${{ steps.version.outputs.version }}'),
                   StringStruct(u'InternalName', u'MinecraftBr'),
@@ -112,25 +112,12 @@ jobs:
       # Build para Windows com version file
       - name: Build Windows executable
         if: matrix.os == 'windows-latest'
-        run: |
-          pyinstaller --noconfirm --onefile --windowed ^
-            --icon "image/favicon.ico" ^
-            --version-file "version_info.txt" ^
-            --name "MinecraftBr-v${{ steps.version.outputs.version }}" ^
-            --distpath "dist" ^
-            --workpath "build" ^
-            minecraft.py
+        run: pyinstaller --noconfirm --onefile --windowed --icon "image/favicon.ico" --version-file "version_info.txt" --name "MinecraftBr-v${{ steps.version.outputs.version }}" --distpath "dist" --workpath "build" minecraft.py
       
       # Build para Linux sem version file
       - name: Build Linux executable
         if: matrix.os == 'ubuntu-latest'
-        run: |
-          pyinstaller --noconfirm --onefile --windowed \
-            --icon "image/favicon.ico" \
-            --name "MinecraftBr-v${{ steps.version.outputs.version }}" \
-            --distpath "dist" \
-            --workpath "build" \
-            minecraft.py
+        run: pyinstaller --noconfirm --onefile --windowed --icon "image/favicon.ico" --name "MinecraftBr-v${{ steps.version.outputs.version }}" --distpath "dist" --workpath "build" minecraft.py
 
       # Criar arquivo de informações da build
       - name: Create build info
