@@ -96,7 +96,7 @@ jobs:
                 [
                 StringTable(
                   u'040904B0',
-                  [StringStruct(u'CompanyName', u'MinecraftBR Project'),
+                  [StringStruct(u'CompanyName', u'MinecraftBR Development Team'),
                   StringStruct(u'FileDescription', u'MinecraftBR Launcher - Launcher personalizado para Minecraft'),
                   StringStruct(u'FileVersion', u'${{ steps.version.outputs.version }}'),
                   StringStruct(u'InternalName', u'MinecraftBr'),
@@ -105,6 +105,8 @@ jobs:
                   StringStruct(u'ProductName', u'MinecraftBR Launcher'),
                   StringStruct(u'ProductVersion', u'${{ steps.version.outputs.version }}'),
                   StringStruct(u'LegalTrademarks', u'MinecraftBR™'),
+                  StringStruct(u'PrivateBuild', u'Official Release'),
+                  StringStruct(u'SpecialBuild', u'GitHub Actions Build'),
                   StringStruct(u'Comments', u'Build: ${{ steps.version.outputs.commit }} | Data: ${{ steps.version.outputs.build_date }} | Commits: ${{ steps.version.outputs.commit_count }}')])
                 ]), 
               VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
@@ -114,15 +116,94 @@ jobs:
           
           echo "Version file created with version ${{ steps.version.outputs.version }}"
 
-      # Build para Windows com version file
+      # Build para Windows
       - name: Build Windows executable
         if: matrix.os == 'windows-latest'
-        run: pyinstaller --noconfirm --onefile --windowed --icon "image/favicon.ico" --version-file "version_info.txt" --name "MinecraftBr" --distpath "dist" --workpath "build" minecraft.py
+        run: |
+          pyinstaller --noconfirm --onefile --windowed ^
+            --icon "image/favicon.ico" ^
+            --version-file "version_info.txt" ^
+            --name "MinecraftBr" ^
+            --distpath "dist" ^
+            --workpath "build" ^
+            --add-data "README.md;." ^
+            --add-data ".github/workflows/build.yml;.github/workflows" ^
+            --hidden-import "win32timezone" ^
+            --hidden-import "PyQt6.QtCore" ^
+            --hidden-import "PyQt6.QtGui" ^
+            --hidden-import "PyQt6.QtWidgets" ^
+            --collect-submodules "requests" ^
+            --collect-submodules "urllib3" ^
+            --exclude-module "tkinter" ^
+            --exclude-module "matplotlib" ^
+            --exclude-module "numpy" ^
+            --uac-admin ^
+            minecraft.py
+        shell: cmd
       
-      # Build para Linux sem version file
+      # Build para Linux
       - name: Build Linux executable
         if: matrix.os == 'ubuntu-latest'
-        run: pyinstaller --noconfirm --onefile --windowed --icon "image/favicon.ico" --name "MinecraftBr" --distpath "dist" --workpath "build" minecraft.py
+        run: |
+          pyinstaller --noconfirm --onefile --windowed \
+            --icon "image/favicon.ico" \
+            --name "MinecraftBr" \
+            --distpath "dist" \
+            --workpath "build" \
+            --add-data "README.md:." \
+            --add-data ".github/workflows/build.yml:.github/workflows" \
+            --hidden-import "PyQt6.QtCore" \
+            --hidden-import "PyQt6.QtGui" \
+            --hidden-import "PyQt6.QtWidgets" \
+            --collect-submodules "requests" \
+            --collect-submodules "urllib3" \
+            --exclude-module "tkinter" \
+            --exclude-module "matplotlib" \
+            --exclude-module "numpy" \
+            minecraft.py
+
+      # Enviar para VirusTotal
+      - name: Submit to VirusTotal
+        if: matrix.os == 'windows-latest'
+        uses: crazy-max/ghaction-virustotal@v4
+        with:
+          vt_api_key: ${{ secrets.VT_API_KEY }}
+          files: dist/MinecraftBr.exe
+          request_rate: 4
+        continue-on-error: true
+
+      # Calcular hashes de segurança
+      - name: Calculate file hashes
+        shell: bash
+        run: |
+          cd dist
+          if [ -f "MinecraftBr.exe" ]; then
+            echo "=== Windows Executable Hashes ===" > hashes.txt
+            echo "File: MinecraftBr.exe" >> hashes.txt
+            echo "MD5: $(md5sum MinecraftBr.exe | cut -d' ' -f1)" >> hashes.txt
+            echo "SHA1: $(sha1sum MinecraftBr.exe | cut -d' ' -f1)" >> hashes.txt
+            echo "SHA256: $(sha256sum MinecraftBr.exe | cut -d' ' -f1)" >> hashes.txt
+            echo "SHA512: $(sha512sum MinecraftBr.exe | cut -d' ' -f1)" >> hashes.txt
+          fi
+          
+          if [ -f "MinecraftBr" ]; then
+            echo "" >> hashes.txt
+            echo "=== Linux Executable Hashes ===" >> hashes.txt
+            echo "File: MinecraftBr" >> hashes.txt
+            echo "MD5: $(md5sum MinecraftBr | cut -d' ' -f1)" >> hashes.txt
+            echo "SHA1: $(sha1sum MinecraftBr | cut -d' ' -f1)" >> hashes.txt
+            echo "SHA256: $(sha256sum MinecraftBr | cut -d' ' -f1)" >> hashes.txt
+            echo "SHA512: $(sha512sum MinecraftBr | cut -d' ' -f1)" >> hashes.txt
+          fi
+          
+          echo "Build Information:" >> hashes.txt
+          echo "Version: ${{ steps.version.outputs.version }}" >> hashes.txt
+          echo "Commit: ${{ steps.version.outputs.commit }}" >> hashes.txt
+          echo "Build Date: ${{ steps.version.outputs.build_date }}" >> hashes.txt
+          echo "Repository: ${{ github.repository }}" >> hashes.txt
+          echo "Workflow: ${{ github.workflow }}" >> hashes.txt
+          
+          cat hashes.txt
 
       - uses: actions/upload-artifact@v4
         with:
@@ -162,6 +243,42 @@ jobs:
       - name: List downloaded artifacts
         run: find artifacts/ -type f -name "*" | head -20
       
+      # Consolidar hashes de segurança
+      - name: Consolidate security hashes
+        run: |
+          echo "# MinecraftBR Launcher v${{ steps.version.outputs.version }} - Security Hashes" > SECURITY_HASHES.md
+          echo "" >> SECURITY_HASHES.md
+          echo "## File Verification" >> SECURITY_HASHES.md
+          echo "" >> SECURITY_HASHES.md
+          
+          if [ -f "artifacts/MinecraftBR-windows-latest/hashes.txt" ]; then
+            cat artifacts/MinecraftBR-windows-latest/hashes.txt >> SECURITY_HASHES.md
+          fi
+          
+          if [ -f "artifacts/MinecraftBR-ubuntu-latest/hashes.txt" ]; then
+            cat artifacts/MinecraftBR-ubuntu-latest/hashes.txt >> SECURITY_HASHES.md
+          fi
+          
+          echo "" >> SECURITY_HASHES.md
+          echo "## Security Information" >> SECURITY_HASHES.md
+          echo "- ✅ **Open Source**: Full source code available at [${{ github.repository }}](${{ github.server_url }}/${{ github.repository }})" >> SECURITY_HASHES.md
+          echo "- ✅ **Automated Build**: Built automatically with GitHub Actions" >> SECURITY_HASHES.md
+          echo "- ✅ **Reproducible**: Anyone can rebuild from source" >> SECURITY_HASHES.md
+          echo "- ✅ **No Obfuscation**: Clear Python source code" >> SECURITY_HASHES.md
+          echo "- ✅ **Dependency Tracking**: All dependencies listed in workflow" >> SECURITY_HASHES.md
+          echo "- ⚠️ **Unsigned**: Executables are not code signed" >> SECURITY_HASHES.md
+          
+          echo "" >> SECURITY_HASHES.md
+          echo "## Windows SmartScreen Bypass" >> SECURITY_HASHES.md
+          echo "If Windows blocks the executable:" >> SECURITY_HASHES.md
+          echo "1. Click **'More info'** on the SmartScreen warning" >> SECURITY_HASHES.md
+          echo "2. Click **'Run anyway'**" >> SECURITY_HASHES.md
+          echo "3. The application is safe - it's just not recognized by Microsoft yet" >> SECURITY_HASHES.md
+          echo "" >> SECURITY_HASHES.md
+          echo "**Why this happens:** New executables need to build reputation with Microsoft's systems." >> SECURITY_HASHES.md
+          
+          cat SECURITY_HASHES.md
+      
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -170,20 +287,17 @@ jobs:
           body: |
             ## MinecraftBR Launcher v${{ steps.version.outputs.version }}
             
-            **Informações da Build:**
+            **Build Information:**
             - 🏷️ Versão: `${{ steps.version.outputs.version }}`
-            - 🔗 Commit: `${{ steps.version.outputs.commit }}`
+            - 🔗 Commit: [`${{ steps.version.outputs.commit }}`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})
             - 📅 Data: `${{ github.event.head_commit.timestamp }}`
             - 👤 Autor: `${{ github.event.head_commit.author.name }}`
-            
-            **Downloads disponíveis:**
-            - Windows: `MinecraftBr.exe`
-            - Linux: `MinecraftBr`
             
             **Changelog:**
             ${{ github.event.head_commit.message }}
           files: |
             artifacts/**/*
+            SECURITY_HASHES.md
           generate_release_notes: false
           draft: false
           prerelease: false
