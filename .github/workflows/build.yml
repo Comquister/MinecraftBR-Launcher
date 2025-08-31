@@ -117,35 +117,16 @@ jobs:
       # Build para Windows com version file
       - name: Build Windows executable
         if: matrix.os == 'windows-latest'
-        run: pyinstaller --noconfirm --onefile --windowed --icon "image/favicon.ico" --version-file "version_info.txt" --name "MinecraftBr-v${{ steps.version.outputs.version }}" --distpath "dist" --workpath "build" minecraft.py
+        run: pyinstaller --noconfirm --onefile --windowed --icon "image/favicon.ico" --version-file "version_info.txt" --name "MinecraftBr" --distpath "dist" --workpath "build" minecraft.py
       
       # Build para Linux sem version file
       - name: Build Linux executable
         if: matrix.os == 'ubuntu-latest'
-        run: pyinstaller --noconfirm --onefile --windowed --icon "image/favicon.ico" --name "MinecraftBr-v${{ steps.version.outputs.version }}" --distpath "dist" --workpath "build" minecraft.py
-
-      # Criar arquivo de informações da build
-      - name: Create build info
-        shell: bash
-        run: |
-          cat > dist/build-info.txt << EOF
-          MinecraftBR Launcher - Build Information
-          =======================================
-          Version: ${{ steps.version.outputs.version }}
-          Commit: ${{ steps.version.outputs.commit }}
-          Build Date: ${{ steps.version.outputs.build_date }}
-          Total Commits: ${{ steps.version.outputs.commit_count }}
-          Platform: ${{ matrix.os }}
-          Python Version: 3.8
-          
-          Built automatically with GitHub Actions
-          Repository: ${{ github.repository }}
-          Workflow: ${{ github.workflow }}
-          EOF
+        run: pyinstaller --noconfirm --onefile --windowed --icon "image/favicon.ico" --name "MinecraftBr" --distpath "dist" --workpath "build" minecraft.py
 
       - uses: actions/upload-artifact@v4
         with:
-          name: MinecraftBR-${{ matrix.os }}-v${{ steps.version.outputs.version }}
+          name: MinecraftBR-${{ matrix.os }}
           path: dist/*
 
   create-release:
@@ -196,8 +177,8 @@ jobs:
             - 👤 Autor: `${{ github.event.head_commit.author.name }}`
             
             **Downloads disponíveis:**
-            - Windows: `MinecraftBr-v${{ steps.version.outputs.version }}.exe`
-            - Linux: `MinecraftBr-v${{ steps.version.outputs.version }}`
+            - Windows: `MinecraftBr.exe`
+            - Linux: `MinecraftBr`
             
             **Changelog:**
             ${{ github.event.head_commit.message }}
