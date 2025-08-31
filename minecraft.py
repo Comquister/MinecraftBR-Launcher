@@ -32,7 +32,7 @@ def diagnose_jvm():print(f"=== DIAGNÓSTICO JVM ===\nSO: {platform.system()} {pl
 releases=requests.get("https://api.github.com/repos/Comquister/MinecraftBR-Modpack/releases/latest").json()["assets"]
 CONFIG={'Title':'MinecraftBr Launcher','GameDir':Path(os.getenv("APPDATA"))/".minecraftbr",'RAM_SIZE':f"{calc_ram()}M",'CLIENT_ID':"708e91b5-99f8-4a1d-80ec-e746cbb24771",'MRPACK_URL':str(next(a["browser_download_url"]for a in releases if a["name"].endswith(".mrpack"))),'MRPACK_HASH':str(next(a["digest"]for a in releases if a["name"].endswith(".mrpack"))),'PORTWEB':random.randint(49152,65535)}
 CONFIG['REDIRECT_URI']=f"http://localhost:{CONFIG['PORTWEB']}/code"
-CONFIG_PROTECTION={'enabled':(CONFIG['GameDir']/"options.txt").exists(),'protected_files':['config/distanthorizons.toml','options.txt','servers.dat']}
+CONFIG_PROTECTION={'enabled':(CONFIG['GameDir']/"options.txt").exists(),'protected_files':['config/distanthorizons.toml','options.txt','servers.dat','meteor-client/']}
 auth_data={'success':None,'code':None,'id_token':None}
 
 def save_login_data(d,t,x):
