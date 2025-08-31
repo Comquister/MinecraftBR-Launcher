@@ -9,7 +9,7 @@ on:
 
 jobs:
   check-changes:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       should-release: ${{ steps.check.outputs.changed }}
     steps:
@@ -27,7 +27,8 @@ jobs:
 
   build:
     needs: check-changes
-    runs-on: ${{ matrix.os }}
+    # runs-on: ${{ matrix.os }}
+    runs-on: self-hosted
     strategy:
       matrix:
         os: [windows-latest, ubuntu-latest]
@@ -57,7 +58,8 @@ jobs:
           MAJOR=1
           MINOR=0
           BUILD=$COMMIT_COUNT
-          REVISION=$(date +'%m%d')
+          # Usar timestamp Unix truncado para evitar problemas com zeros à esquerda
+          REVISION=$(($(date +%s) % 10000))  # Últimos 4 dígitos do timestamp
           VERSION="$MAJOR.$MINOR.$BUILD.$REVISION"
           
           # Versão para PyInstaller (deve ser inteiros separados por vírgulas)
