@@ -4,215 +4,61 @@ on:
     branches: [main]
     paths: ['minecraft.py', '.github/workflows/build.yml']
   workflow_dispatch:
+  release:
+    types: [published]
 
 jobs:
-  build-and-release:
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      should-release: ${{ steps.check.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: check
+        run: |
+          changed_files=$(git diff HEAD^ HEAD --name-only)
+          if echo "$changed_files" | grep -E "(minecraft\.py|\.github/workflows/build\.yml)"; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    needs: check-changes
     runs-on: ${{ matrix.os }}
-    permissions:
-      contents: write
     strategy:
       matrix:
-        include:
-          - os: windows-latest
-            name: windows
-            ext: .exe
-          - os: ubuntu-latest  
-            name: linux
-            ext: ""
+        os: [windows-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      
-      # Instalar dependências com versões específicas para consistência
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyinstaller==6.3.0 psutil==5.9.8 requests==2.31.0 flask==3.0.0 PyQt6==6.6.1 portablemc==3.0.0
-
-      # Versão simplificada
-      - name: Set version
-        id: version
-        run: |
-          echo "version=1.0.$(git rev-list --count HEAD)" >> $GITHUB_OUTPUT
-          echo "commit=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-        shell: bash
-
-      # Criar manifesto de aplicação (Windows) - melhora detecção AV
-      - name: Create app manifest (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          echo '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-          <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-            <assemblyIdentity version="1.0.0.0" processorArchitecture="*" name="MinecraftBR.Launcher" type="win32"/>
-            <description>MinecraftBR Launcher - Gerenciador de versões Minecraft - https://minecraftbr.com</description>
-            <dependency>
-              <dependentAssembly>
-                <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/>
-              </dependentAssembly>
-            </dependency>
-            <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
-              <security>
-                <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
-                  <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
-                </requestedPrivileges>
-              </security>
-            </trustInfo>
-            <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
-              <application>
-                <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
-                <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/>
-                <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/>
-                <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"/>
-                <supportedOS Id="{e2011457-1546-43c5-a5fe-008deee3d3f0}"/>
-              </application>
-            </compatibility>
-          </assembly>' > app.manifest
-
-      # Build otimizado
-      - name: Build executable
-        run: |
-          pyinstaller --noconfirm --onefile --noconsole \
-            ${{ matrix.os == 'windows-latest' && '--icon=image/favicon.ico --manifest=app.manifest' || '--icon=image/favicon.ico' }} \
-            --name=MinecraftBr-${{ matrix.name }}${{ matrix.ext }} \
-            --distpath=dist \
-            --exclude-module=tkinter --exclude-module=matplotlib --exclude-module=numpy \
-            --exclude-module=scipy --exclude-module=pandas --exclude-module=PIL \
-            --strip \
-            ${{ matrix.os == 'windows-latest' && '--collect-submodules=win32timezone' || '' }} \
-            minecraft.py
-        shell: bash
-
-      # Assinar executável digitalmente (simulado - melhora reputação)
-      - name: Add metadata and signatures (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          # Adicionar metadados de arquivo
-          $exe = "dist/MinecraftBr-windows.exe"
-          if (Test-Path $exe) {
-            # Criar arquivo .sig com hash SHA256 (simula assinatura)
-            $hash = (Get-FileHash $exe -Algorithm SHA256).Hash
-            $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss UTC"
-            @"
-          MinecraftBR Launcher Digital Signature
-          =====================================
-          Publisher: MinecraftBR Development Team (https://minecraftbr.com)
-          File: MinecraftBr-windows.exe
-          SHA256: $hash
-          Signed: $timestamp
-          Purpose: Minecraft Launcher Application
-          Website: https://minecraftbr.com
-          Build: ${{ steps.version.outputs.version }}-${{ steps.version.outputs.commit }}
-          "@" | Out-File -FilePath "dist/MinecraftBr-windows.exe.sig" -Encoding UTF8
-            
-            Write-Host "Metadata and signature file created"
-          }
-
-      # Scan VirusTotal e criar relatório de segurança
-      - name: Security scan and report
-        if: matrix.os == 'windows-latest'
-        run: |
-          exe="dist/MinecraftBr-windows.exe"
-          if [ -f "$exe" ]; then
-            # Calcular hashes de segurança
-            echo "# MinecraftBR Security Report v${{ steps.version.outputs.version }}" > dist/SECURITY_REPORT.md
-            echo "" >> dist/SECURITY_REPORT.md
-            echo "## File Verification" >> dist/SECURITY_REPORT.md
-            echo '```' >> dist/SECURITY_REPORT.md
-            echo "Filename: MinecraftBr-windows.exe" >> dist/SECURITY_REPORT.md
-            echo "Size: $(stat -c%s "$exe") bytes" >> dist/SECURITY_REPORT.md
-            echo "MD5:    $(md5sum "$exe" | cut -d' ' -f1)" >> dist/SECURITY_REPORT.md
-            echo "SHA1:   $(sha1sum "$exe" | cut -d' ' -f1)" >> dist/SECURITY_REPORT.md
-            echo "SHA256: $(sha256sum "$exe" | cut -d' ' -f1)" >> dist/SECURITY_REPORT.md
-            echo '```' >> dist/SECURITY_REPORT.md
-            echo "" >> dist/SECURITY_REPORT.md
-            echo "## Security Features" >> dist/SECURITY_REPORT.md
-            echo "✅ **Open Source** - Código fonte disponível em GitHub" >> dist/SECURITY_REPORT.md
-            echo "✅ **Build Automático** - Compilado via GitHub Actions" >> dist/SECURITY_REPORT.md  
-            echo "✅ **Sem Ofuscação** - Código Python limpo e legível" >> dist/SECURITY_REPORT.md
-            echo "✅ **Website Oficial** - https://minecraftbr.com" >> dist/SECURITY_REPORT.md
-            echo "✅ **Manifesto de Aplicação** - Declara permissões necessárias" >> dist/SECURITY_REPORT.md
-            echo "✅ **Stripped Binary** - Símbolos de debug removidos" >> dist/SECURITY_REPORT.md
-            echo "✅ **Dependências Auditadas** - Versões específicas e conhecidas" >> dist/SECURITY_REPORT.md
-            echo "" >> dist/SECURITY_REPORT.md
-            echo "## Build Info" >> dist/SECURITY_REPORT.md
-            echo "- **Website:** https://minecraftbr.com" >> dist/SECURITY_REPORT.md
-            echo "- **Versão:** ${{ steps.version.outputs.version }}" >> dist/SECURITY_REPORT.md
-            echo "- **Commit:** ${{ steps.version.outputs.commit }}" >> dist/SECURITY_REPORT.md
-            echo "- **Python:** 3.11" >> dist/SECURITY_REPORT.md
-            echo "- **PyInstaller:** 6.3.0" >> dist/SECURITY_REPORT.md
-          fi
-        shell: bash
-
-      # Submit para VirusTotal se disponível
-      - name: VirusTotal scan
-        if: matrix.os == 'windows-latest' && vars.VT_API_KEY
-        uses: crazy-max/ghaction-virustotal@v4
-        with:
-          vt_api_key: ${{ secrets.VT_API_KEY }}
-          files: dist/MinecraftBr-windows.exe
-        continue-on-error: true
-
-      # Upload como artifact primeiro
+      - run: python -m pip install --upgrade pip && pip install pyinstaller psutil requests flask PyQt6 portablemc
+      - run: pyinstaller --noconfirm --onefile --windowed --icon "image/favicon.ico" --name "MinecraftBr" minecraft.py
       - uses: actions/upload-artifact@v4
         with:
-          name: MinecraftBR-${{ matrix.name }}
+          name: MinecraftBR-${{ matrix.os }}
           path: dist/*
-          retention-days: 30
 
-      # Criar release apenas no Windows (evita duplicação)
-      - name: Create Release
-        if: matrix.os == 'windows-latest' && github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: MinecraftBR Launcher v${{ steps.version.outputs.version }}
-          body: |
-            🚀 **MinecraftBR Launcher v${{ steps.version.outputs.version }}**
-            
-            **Website Oficial:** https://minecraftbr.com
-            
-            **Downloads:**
-            - 🪟 **Windows**: `MinecraftBr-windows.exe`
-            - 🐧 **Linux**: Baixe do workflow artifacts (temporário)
-            
-            **Segurança:**
-            - ✅ Build automático via GitHub Actions
-            - ✅ Código fonte aberto e auditável  
-            - ✅ Hashes SHA256 para verificação
-            - ✅ Manifesto de aplicação Windows
-            - ✅ Website oficial verificado
-            
-            **Links:**
-            - 🌐 **Site**: https://minecraftbr.com
-            - 📖 **Código**: ${{ github.server_url }}/${{ github.repository }}
-            - 🔗 **Commit**: [`${{ steps.version.outputs.commit }}`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})
-          files: |
-            dist/MinecraftBr-windows.exe
-            dist/MinecraftBr-windows.exe.sig
-            dist/SECURITY_REPORT.md
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Job separado para Linux (mais leve)
-  build-linux:
+  create-release:
+    needs: [check-changes, build]
+    if: needs.check-changes.outputs.should-release == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - id: version
+        run: echo "tag=v$(date +'%Y%m%d%H%M%S')" >> $GITHUB_OUTPUT
+      - uses: actions/download-artifact@v4
+      - uses: softprops/action-gh-release@v2
         with:
-          python-version: "3.11"
-      - run: |
-          pip install pyinstaller psutil requests flask PyQt6 portablemc
-          pyinstaller --onefile --noconsole --name=MinecraftBr-linux minecraft.py
-      - uses: actions/upload-artifact@v4
-        with:
-          name: MinecraftBR-linux-binary
-          path: dist/MinecraftBr-linux
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: MinecraftBR Auto Release ${{ steps.version.outputs.tag }}
+          files: |
+            MinecraftBR-windows-latest/*
+            MinecraftBR-ubuntu-latest/*
+          generate_release_notes: true
