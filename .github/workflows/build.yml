@@ -175,6 +175,11 @@ jobs:
           echo "tag=v$VERSION" >> $GITHUB_OUTPUT
 
       - uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+      
+      - name: List downloaded artifacts
+        run: find artifacts/ -type f -name "*" | head -20
       
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -197,8 +202,7 @@ jobs:
             **Changelog:**
             ${{ github.event.head_commit.message }}
           files: |
-            MinecraftBR-windows-latest-v${{ steps.version.outputs.version }}/*
-            MinecraftBR-ubuntu-latest-v${{ steps.version.outputs.version }}/*
+            artifacts/**/*
           generate_release_notes: false
           draft: false
           prerelease: false
