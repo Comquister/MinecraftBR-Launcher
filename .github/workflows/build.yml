@@ -60,7 +60,11 @@ jobs:
           REVISION=$(date +'%m%d')
           VERSION="$MAJOR.$MINOR.$BUILD.$REVISION"
           
+          # Versão para PyInstaller (deve ser inteiros separados por vírgulas)
+          VERSION_TUPLE="$MAJOR,$MINOR,$BUILD,$REVISION"
+          
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version_tuple=$VERSION_TUPLE" >> $GITHUB_OUTPUT
           echo "commit=$COMMIT_SHORT" >> $GITHUB_OUTPUT
           echo "build_date=$BUILD_DATE" >> $GITHUB_OUTPUT
           echo "build_year=$BUILD_YEAR" >> $GITHUB_OUTPUT
@@ -77,8 +81,8 @@ jobs:
           # UTF-8
           VSVersionInfo(
             ffi=FixedFileInfo(
-              filevers=(${{ steps.version.outputs.version }}),
-              prodvers=(${{ steps.version.outputs.version }}),
+              filevers=(${{ steps.version.outputs.version_tuple }}),
+              prodvers=(${{ steps.version.outputs.version_tuple }}),
               mask=0x3f,
               flags=0x0,
               OS=0x40004,
