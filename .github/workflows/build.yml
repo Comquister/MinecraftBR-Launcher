@@ -9,7 +9,7 @@ on:
 
 jobs:
   check-changes:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     outputs:
       should-release: ${{ steps.check.outputs.changed }}
     steps:
@@ -27,8 +27,7 @@ jobs:
 
   build:
     needs: check-changes
-    # runs-on: ${{ matrix.os }}
-    runs-on: self-hosted
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [windows-latest, ubuntu-latest]
