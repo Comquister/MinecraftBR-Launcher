@@ -1,13 +1,11 @@
-print("""
- ██████   ██████  ███                                                      ██████   █████    ███████████  ███████████  
-░░██████ ██████  ░░░                                                      ███░░███ ░░███    ░░███░░░░░███░░███░░░░░███ 
- ░███░█████░███  ████  ████████    ██████   ██████  ████████   ██████    ░███ ░░░  ███████   ░███    ░███ ░███    ░███ 
- ░███░░███ ░███ ░░███ ░░███░░███  ███░░███ ███░░███░░███░░███ ░░░░░███  ███████   ░░░███░    ░██████████  ░██████████  
- ░███ ░░░  ░███  ░███  ░███ ░███ ░███████ ░███ ░░░  ░███ ░░░   ███████ ░░░███░      ░███     ░███░░░░░███ ░███░░░░░███ 
- ░███      ░███  ░███  ░███ ░███ ░███░░░  ░███  ███ ░███      ███░░███   ░███       ░███ ███ ░███    ░███ ░███    ░███ 
- █████     █████ █████ ████ █████░░██████ ░░██████  █████    ░░████████  █████      ░░█████  ███████████  █████   █████
-░░░░░     ░░░░░ ░░░░░ ░░░░ ░░░░░  ░░░░░░   ░░░░░░  ░░░░░      ░░░░░░░░  ░░░░░        ░░░░░  ░░░░░░░░░░░  ░░░░░   ░░░░░ 
-""")
+print(""" ██████   ██████  ███                                                      ██████   █████    ███████████
+░░██████ ██████  ░░░                                                      ███░░███ ░░███    ░░███░░░░░███
+ ░███░█████░███  ████  ████████    ██████   ██████  ████████   ██████    ░███ ░░░  ███████   ░███    ░███ ████████
+ ░███░░███ ░███ ░░███ ░░███░░███  ███░░███ ███░░███░░███░░███ ░░░░░███  ███████   ░░░███░    ░██████████ ░░███░░███
+ ░███ ░░░  ░███  ░███  ░███ ░███ ░███████ ░███ ░░░  ░███ ░░░   ███████ ░░░███░      ░███     ░███░░░░░███ ░███ ░░░
+ ░███      ░███  ░███  ░███ ░███ ░███░░░  ░███  ███ ░███      ███░░███   ░███       ░███ ███ ░███    ░███ ░███
+ █████     █████ █████ ████ █████░░██████ ░░██████  █████    ░░████████  █████      ░░█████  ███████████  █████
+░░░░░     ░░░░░ ░░░░░ ░░░░ ░░░░░  ░░░░░░   ░░░░░░  ░░░░░      ░░░░░░░░  ░░░░░        ░░░░░  ░░░░░░░░░░░  ░░░░░""")
 import sys,platform,psutil,zipfile,subprocess,json,hashlib,random,concurrent.futures,pickle,webbrowser,requests,time,threading,os,shutil,logging
 from pathlib import Path
 from PyQt6.QtWidgets import *
@@ -27,12 +25,10 @@ def calc_sha256(f):
             for b in iter(lambda:x.read(4096),b""):h.update(b)
         return f"sha256:{h.hexdigest()}"
     except:return None
-def diagnose_jvm():print(f"=== DIAGNÓSTICO JVM ===\nSO: {platform.system()} {platform.release()}\nArquitetura: {platform.machine()}\nRAM Total: {psutil.virtual_memory().total/(1024**3):.1f} GB\nRAM configurada: {calc_ram()}M\n{'✓ Sistema 64-bit - sem limitações de RAM'if platform.machine().endswith('64')else'⚠ Sistema 32-bit - RAM limitada a 3GB'}\n=========================")
-
 releases=requests.get("https://api.github.com/repos/Comquister/MinecraftBR-Modpack/releases/latest").json()["assets"]
-CONFIG={'Title':'MinecraftBr Launcher','GameDir':Path(os.getenv("APPDATA"))/".minecraftbr",'RAM_SIZE':f"{calc_ram()}M",'CLIENT_ID':"708e91b5-99f8-4a1d-80ec-e746cbb24771",'MRPACK_URL':str(next(a["browser_download_url"]for a in releases if a["name"].endswith(".mrpack"))),'MRPACK_HASH':str(next(a["digest"]for a in releases if a["name"].endswith(".mrpack"))),'PORTWEB':random.randint(49152,65535)}
+CONFIG={'Title':'MinecraftBr','GameDir':Path(os.getenv("APPDATA"))/".minecraftbr",'RAM_SIZE':f"{calc_ram()}M",'CLIENT_ID':"708e91b5-99f8-4a1d-80ec-e746cbb24771",'MRPACK_URL':str(next(a["browser_download_url"]for a in releases if a["name"].endswith(".mrpack"))),'MRPACK_HASH':str(next(a["digest"]for a in releases if a["name"].endswith(".mrpack"))),'PORTWEB':random.randint(49152,65535)}
 CONFIG['REDIRECT_URI']=f"http://localhost:{CONFIG['PORTWEB']}/code"
-CONFIG_PROTECTION={'enabled':(CONFIG['GameDir']/"options.txt").exists(),'protected_files':['config/distanthorizons.toml','options.txt','servers.dat','meteor-client/']}
+CONFIG_PROTECTION={'enabled':(CONFIG['GameDir']/"options.txt").exists(),'protected_files':['config/distanthorizons.toml','options.txt','servers.dat', 'meteor-client/*']}
 auth_data={'success':None,'code':None,'id_token':None}
 
 def save_login_data(d,t,x):
@@ -46,7 +42,7 @@ def load_login_data(d):
             with open(p,'rb')as f:return pickle.load(f)
     except Exception as e:print(f"Erro ao carregar login: {e}")
     return None
-def is_protected_file(f):return CONFIG_PROTECTION['enabled']and any(str(f).replace('\\','/').endswith(p)for p in CONFIG_PROTECTION.get('protected_files',[]))
+def is_protected_file(f: Path) -> bool: return CONFIG_PROTECTION['enabled'] and any((f.relative_to(CONFIG['GameDir']).as_posix() == p) or f.relative_to(CONFIG['GameDir']).as_posix().startswith(p.rstrip('/') + '/') for p in CONFIG_PROTECTION.get('protected_files', []))
 def download_bg(d):
     p=d/"background.png"
     if not p.exists():
@@ -142,7 +138,48 @@ class AuthThread(QThread):
             while auth_data['success']is None and time.time()<timeout:time.sleep(0.5)
             if auth_data['success']and MicrosoftAuthSession.check_token_id(auth_data['id_token'],self.email,nonce):
                 auth_session=MicrosoftAuthSession.authenticate(CONFIG['CLIENT_ID'],CONFIG['CLIENT_ID'],auth_data['code'],CONFIG['REDIRECT_URI'])
-                auth_session.email=self.email;self.auth_success.emit(auth_session,self.email)
+                auth_session.email=self.email
+                
+                # Traz o foco de volta para o aplicativo após login bem-sucedido
+                try:
+                    if os.name == 'nt':  # Windows
+                        import ctypes
+                        from ctypes import wintypes
+                        
+                        # Encontra a janela do aplicativo
+                        def enum_windows_proc(hwnd, lParam):
+                            if ctypes.windll.user32.IsWindowVisible(hwnd):
+                                length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+                                if length > 0:
+                                    buffer = ctypes.create_unicode_buffer(length + 1)
+                                    ctypes.windll.user32.GetWindowTextW(hwnd, buffer, length + 1)
+                                    if CONFIG['Title'] in buffer.value:
+                                        # Traz a janela para frente e dá foco
+                                        ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+                                        ctypes.windll.user32.SetForegroundWindow(hwnd)
+                                        ctypes.windll.user32.BringWindowToTop(hwnd)
+                                        return False
+                            return True
+                        
+                        EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+                        ctypes.windll.user32.EnumWindows(EnumWindowsProc(enum_windows_proc), 0)
+                    
+                    else:  # Linux/macOS
+                        import subprocess
+                        try:
+                            # Tenta usar wmctrl no Linux
+                            subprocess.run(['wmctrl', '-a', CONFIG['Title']], check=True, capture_output=True)
+                        except:
+                            # Fallback para xdotool
+                            try:
+                                subprocess.run(['xdotool', 'search', '--name', CONFIG['Title'], 'windowactivate'], 
+                                             check=True, capture_output=True)
+                            except:
+                                pass  # Se não conseguir, ignora silenciosamente
+                except:
+                    pass  # Se der erro, ignora e continua normalmente
+                
+                self.auth_success.emit(auth_session,self.email)
             else:self.auth_error.emit("Falha na autenticação")
         except Exception as e:self.auth_error.emit(str(e))
 
@@ -275,7 +312,8 @@ class MinecraftLauncher(QMainWindow):
         self.auth_session,self.username,self.last_login_data=None,None,load_login_data(self.game_dir)
         self.auth_thread,self.minecraft_thread,self._pending_auth_email=None,None,None
         self.progress_timer,self.current_progress=QTimer(),0
-        self.init_ui();self.load_background()
+        self.init_ui()
+        self.load_background()
     def init_ui(self):
         self.setWindowTitle(CONFIG['Title'])
         try:
@@ -283,7 +321,14 @@ class MinecraftLauncher(QMainWindow):
             if r.status_code==200:p=QPixmap();p.loadFromData(r.content);self.setWindowIcon(QIcon(p))
         except:pass
         self.setGeometry(100,100,450,680)
-        self.setStyleSheet("""QMainWindow{background-image:url("""+str(self.game_dir)+"""/background.png);background-repeat:no-repeat;background-position:center}QWidget{color:#FFFFFF;font-family:'Segoe UI',Arial,sans-serif}QLabel{color:#FFFFFF}QRadioButton{color:#FFFFFF;font-size:14px;padding:8px;spacing:10px}QRadioButton::indicator{width:18px;height:18px}QRadioButton::indicator:unchecked{border:2px solid #CCCCCC;border-radius:9px;background:transparent}QRadioButton::indicator:checked{border:2px solid #4CAF50;border-radius:9px;background:#4CAF50}QPushButton{background-color:rgba(60,60,60,0.8);border:1px solid #888;border-radius:6px;color:white;font-size:12px;padding:8px}QPushButton:hover{background-color:rgba(80,80,80,0.9);border:1px solid #AAA}""")
+        self.setStyleSheet("""QWidget{color:#FFFFFF;font-family:'Segoe UI',Arial,sans-serif}
+                           QLabel{color:#FFFFFF}
+                           QRadioButton{color:#FFFFFF;font-size:14px;padding:8px;spacing:10px}
+                           QRadioButton::indicator{width:18px;height:18px}
+                           QRadioButton::indicator:unchecked{border:2px solid #CCCCCC;border-radius:9px;background:transparent}
+                           QRadioButton::indicator:checked{border:2px solid #4CAF50;border-radius:9px;background:#4CAF50}
+                           QPushButton{background-color:rgba(60,60,60,0.8);border:1px solid #888;border-radius:6px;color:white;font-size:12px;padding:8px}
+                           QPushButton:hover{background-color:rgba(80,80,80,0.9);border:1px solid #AAA}""")
         central_widget=QWidget();self.setCentralWidget(central_widget);main_layout=QVBoxLayout(central_widget);main_layout.setSpacing(0);main_layout.setContentsMargins(0,0,0,0)
         self.config_btn=QPushButton("⚙️",self);self.config_btn.setFixedSize(40,40);self.config_btn.move(self.width()-60,20)
         self.config_btn.setStyleSheet("QPushButton{background-color:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.3);border-radius:20px;font-size:16px}QPushButton:hover{background-color:rgba(0,0,0,0.5)}")
@@ -329,9 +374,9 @@ class MinecraftLauncher(QMainWindow):
             self.play_btn.setStyleSheet(f"QPushButton{{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #2196F3,stop:{p:.2f} #2196F3,stop:{s:.2f} #424242,stop:1 #424242);color:white;border:none;border-radius:8px;font-size:16px;font-weight:bold}}")
     def load_background(self):
         try:
-            bg_path=download_bg(self.game_dir)
+            bg_path=str(download_bg(self.game_dir))
             if bg_path:
-                pixmap=QPixmap(str(bg_path))
+                pixmap = QPixmap(bg_path)
                 if not pixmap.isNull():
                     scaled_pixmap=pixmap.scaled(pixmap.width()*5,pixmap.height()*5,Qt.AspectRatioMode.IgnoreAspectRatio,Qt.TransformationMode.FastTransformation)
                     brush=QBrush(scaled_pixmap);palette=QPalette();palette.setBrush(QPalette.ColorRole.Window,brush);self.setPalette(palette);return
@@ -466,5 +511,5 @@ class AutoUpdater:
 def check_for_updates():return AutoUpdater().check_and_update()
 def main():
     if not sys.argv[0].endswith(".py")and not check_for_updates():sys.exit(1)
-    app=QApplication(sys.argv);app.setApplicationName("MinecraftBr Launcher");launcher=MinecraftLauncher();launcher.show();sys.exit(app.exec())
+    app=QApplication(sys.argv);app.setApplicationName("MinecraftBr");launcher=MinecraftLauncher();launcher.show();sys.exit(app.exec())
 if __name__=="__main__":main()
