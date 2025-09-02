@@ -25,8 +25,16 @@ def calc_sha256(f):
             for b in iter(lambda:x.read(4096),b""):h.update(b)
         return f"sha256:{h.hexdigest()}"
     except:return None
-latest_release= requests.get("https://api.github.com/repos/Comquister/MinecraftBR-Modpack/releases/latest").json()
-releases=latest_release["assets"]
+def get_latest_release_safe():
+    try:
+        response = requests.get("https://api.github.com/repos/Comquister/MinecraftBR-Modpack/releases/latest", timeout=10)
+        return response.json()
+    except:
+        # Fallback para modo offline
+        return {"assets": [], "tag_name": "offline"}
+
+latest_release = get_latest_release_safe()
+releases = latest_release["assets"]
 def get_instance_dir(base_dir, version_tag):
     return base_dir / "instancias" / version_tag
 CONFIG={'Title':'MinecraftBr','BaseDir':Path(os.getenv("APPDATA"))/".minecraftbr",'RAM_SIZE':f"{calc_ram()}M",'CLIENT_ID':"708e91b5-99f8-4a1d-80ec-e746cbb24771",'MRPACK_URL':str(next(a["browser_download_url"]for a in releases if a["name"].endswith(".mrpack"))),'VERSION_TAG':latest_release.get("tag_name","latest") if releases else "latest",'PORTWEB':random.randint(49152,65535)}
@@ -159,13 +167,28 @@ class ModDownloader:
             p,fp=Path(f['path']),self.game_dir/Path(f['path'])
             fp.parent.mkdir(parents=True,exist_ok=True)
             h=f.get('hashes',{}).get('sha256')
+            
+            # Se o arquivo já existe e tem o hash correto, pula
             if fp.exists()and h and calc_sha256(fp)==h:
                 with self.stats_lock:self.download_stats['skipped']+=1
                 self._update_progress();return{'status':'skipped','file':str(p)}
+            
+            # Se o arquivo existe mas não tem hash ou está incorreto, tenta usar mesmo assim se não há internet
+            if fp.exists():
+                try:
+                    # Testa se há internet
+                    requests.get("https://www.google.com", timeout=3)
+                except:
+                    # Sem internet, usa arquivo existente
+                    print(f"Modo offline: usando arquivo existente {p}")
+                    with self.stats_lock:self.download_stats['skipped']+=1
+                    self._update_progress();return{'status':'skipped','file':str(p)}
+            
             downloads=f.get('downloads',[])
             if not downloads:
                 with self.stats_lock:self.download_stats['failed']+=1
                 self._update_progress();return{'status':'failed','file':str(p),'error':'No download URLs'}
+            
             for i,url in enumerate(downloads):
                 try:
                     r=requests.get(url,timeout=min(120,max(30,f.get('fileSize',1000000)//100000)),stream=True,headers={'User-Agent':'MinecraftBR-Launcher/1.0'})
@@ -387,7 +410,25 @@ class MinecraftThread(QThread):
             mrpack_path=self.game_dir/"modpack.zip"
             version_file=self.game_dir/"version.txt"
             
-            # Verifica se precisa baixar baseado na tag da versão
+            # Verifica se existe modpack local
+            if mrpack_path.exists():
+                try:
+                    with open(version_file,'r')as f:
+                        current_version=f.read().strip()
+                    print(f"Usando modpack local versão {current_version}")
+                    return self._extract_mrpack(mrpack_path)
+                except:
+                    pass
+            
+            # Tenta baixar se há internet
+            if not releases:  # Se não conseguiu obter releases online
+                if mrpack_path.exists():
+                    print("Modo offline: usando modpack existente")
+                    return self._extract_mrpack(mrpack_path)
+                else:
+                    raise Exception("Nenhum modpack encontrado e sem conexão com internet")
+            
+            # Download normal se há internet
             needs_download=True
             if mrpack_path.exists() and version_file.exists():
                 try:
@@ -400,25 +441,30 @@ class MinecraftThread(QThread):
                     pass
             
             if needs_download:
-                self.status_update.emit("Baixando modpack...");self.progress_update.emit(10)
-                r=requests.get(CONFIG['MRPACK_URL'],stream=True,timeout=120);r.raise_for_status()
-                total,downloaded=int(r.headers.get('content-length',0)),0
-                with open(mrpack_path,'wb')as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        if chunk:f.write(chunk);downloaded+=len(chunk)
-                        if total>0:self.progress_update.emit(10+int((downloaded/total)*20))
-                
-                # Salva a versão atual
-                with open(version_file,'w')as f:
-                    f.write(CONFIG['VERSION_TAG'])
-                print(f"Modpack atualizado para versão {CONFIG['VERSION_TAG']}")
-                
-                self.status_update.emit("Extraindo modpack...");self.progress_update.emit(35)
-                return self._extract_mrpack(mrpack_path)
-            else:
-                # Se não precisa baixar, apenas carrega o mrpack existente
-                return self._load_existing_mrpack()
-        except Exception as e:print(f"Erro na sincronização do mrpack: {e}");return False
+                try:
+                    self.status_update.emit("Baixando modpack...");self.progress_update.emit(10)
+                    r=requests.get(CONFIG['MRPACK_URL'],stream=True,timeout=120);r.raise_for_status()
+                    total,downloaded=int(r.headers.get('content-length',0)),0
+                    with open(mrpack_path,'wb')as f:
+                        for chunk in r.iter_content(chunk_size=8192):
+                            if chunk:f.write(chunk);downloaded+=len(chunk)
+                            if total>0:self.progress_update.emit(10+int((downloaded/total)*20))
+                    
+                    with open(version_file,'w')as f:
+                        f.write(CONFIG['VERSION_TAG'])
+                    print(f"Modpack atualizado para versão {CONFIG['VERSION_TAG']}")
+                except Exception as e:
+                    if mrpack_path.exists():
+                        print(f"Erro no download, usando modpack local: {e}")
+                    else:
+                        raise Exception(f"Erro no download e nenhum modpack local encontrado: {e}")
+            
+            self.status_update.emit("Extraindo modpack...");self.progress_update.emit(35)
+            return self._extract_mrpack(mrpack_path)
+            
+        except Exception as e:
+            print(f"Erro na sincronização do mrpack: {e}")
+            return False
     def _extract_mrpack(self,p):
         try:
             temp_dir=self.game_dir/"temp_mrpack"
@@ -742,7 +788,12 @@ class AutoUpdater:
             else:sys.exit(0)
         except Exception as e:print(f"Erro no sistema de atualização: {e}");return True
 
-def check_for_updates():return AutoUpdater().check_and_update()
+def check_for_updates():
+    try:
+        return AutoUpdater().check_and_update()
+    except:
+        print("Modo offline: pulando verificação de atualizações")
+        return True
 def main():
     if not sys.argv[0].endswith(".py")and not check_for_updates():sys.exit(1)
     app=QApplication(sys.argv);app.setApplicationName("MinecraftBr");launcher=MinecraftLauncher();launcher.show();sys.exit(app.exec())
