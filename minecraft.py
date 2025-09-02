@@ -25,16 +25,8 @@ def calc_sha256(f):
             for b in iter(lambda:x.read(4096),b""):h.update(b)
         return f"sha256:{h.hexdigest()}"
     except:return None
-def get_latest_release_safe():
-    try:
-        response = requests.get("https://api.github.com/repos/Comquister/MinecraftBR-Modpack/releases/latest", timeout=10)
-        return response.json()
-    except:
-        # Fallback para modo offline
-        return {"assets": [], "tag_name": "offline"}
-
-latest_release = get_latest_release_safe()
-releases = latest_release["assets"]
+latest_release= requests.get("https://api.github.com/repos/Comquister/MinecraftBR-Modpack/releases/latest").json()
+releases=latest_release["assets"]
 def get_instance_dir(base_dir, version_tag):
     return base_dir / "instancias" / version_tag
 CONFIG={'Title':'MinecraftBr','BaseDir':Path(os.getenv("APPDATA"))/".minecraftbr",'RAM_SIZE':f"{calc_ram()}M",'CLIENT_ID':"708e91b5-99f8-4a1d-80ec-e746cbb24771",'MRPACK_URL':str(next(a["browser_download_url"]for a in releases if a["name"].endswith(".mrpack"))),'VERSION_TAG':latest_release.get("tag_name","latest") if releases else "latest",'PORTWEB':random.randint(49152,65535)}
@@ -44,19 +36,14 @@ auth_data={'success':None,'code':None,'id_token':None}
 def save_login_data(d, t, x, auth_session=None):
     try:
         data_to_save = {'type': t, 'data': x}
-        
-        # Se for login Microsoft e tiver auth_session, salva os tokens e dados do perfil
         if t == 'microsoft' and auth_session:
             try:
-                # Salva dados do perfil
                 if hasattr(auth_session, 'username'):
                     data_to_save['data']['username'] = auth_session.username
                 if hasattr(auth_session, 'uuid'):
                     data_to_save['data']['uuid'] = auth_session.uuid
                 if hasattr(auth_session, 'xuid'):
                     data_to_save['data']['xuid'] = auth_session.xuid
-                
-                # Salva tokens
                 data_to_save['tokens'] = {
                     'access_token': getattr(auth_session, 'access_token', None),
                     'refresh_token': getattr(auth_session, 'refresh_token', None),
@@ -69,7 +56,6 @@ def save_login_data(d, t, x, auth_session=None):
             json.dump(data_to_save, f)
     except Exception as e:
         print(f"Erro ao salvar login: {e}")
-
 def load_login_data(d):
     try:
         p = CONFIG['BaseDir']/"last_login.json"
@@ -79,35 +65,26 @@ def load_login_data(d):
     except Exception as e:
         print(f"Erro ao carregar login: {e}")
     return None
-
 def try_restore_microsoft_session(login_data):
     try:
         if not login_data or login_data.get('type') != 'microsoft':
             return None
-            
         tokens = login_data.get('tokens')
         if not tokens or not tokens.get('refresh_token'):
             return None
-            
         expires_at = tokens.get('expires_at')
         if expires_at and time.time() > (expires_at - 300):
             print("Token expirado, será necessário reautenticar")
             return None
-            
-        # Cria uma nova sessão com os tokens salvos
         auth_session = MicrosoftAuthSession.__new__(MicrosoftAuthSession)
         auth_session.access_token = tokens['access_token']
         auth_session.refresh_token = tokens['refresh_token']
         auth_session.expires_at = tokens.get('expires_at')
         auth_session.email = login_data['data'].get('email', '')
-        auth_session.client_id = CONFIG['CLIENT_ID']  # ADICIONAR ESTA LINHA
-        
-        # Define todos os atributos necessários
+        auth_session.client_id = CONFIG['CLIENT_ID']
         auth_session.username = login_data['data'].get('username', 'Usuário')
         auth_session.uuid = login_data['data'].get('uuid', '00000000-0000-0000-0000-000000000000')
         auth_session.xuid = login_data['data'].get('xuid', '0000000000000000')
-        
-        # Tenta validar o token e obter dados atualizados
         try:
             import requests
             headers = {'Authorization': f'Bearer {auth_session.access_token}'}
@@ -129,11 +106,9 @@ def try_restore_microsoft_session(login_data):
                 print("Usando sessão com dados salvos")
                 return auth_session
             return None
-            
     except Exception as e:
         print(f"Erro ao restaurar sessão Microsoft: {e}")
         return None
-
 def download_bg(d):
     p=d/"background.png"
     if not p.exists():
@@ -143,7 +118,6 @@ def download_bg(d):
                 with open(p,'wb')as f:f.write(r.content)
         except Exception as e:print(f"Erro ao baixar background: {e}");return None
     return p if p.exists()else None
-
 def create_auth_app():
     app=Flask(__name__)
     app.logger.disabled=True
@@ -155,7 +129,6 @@ def create_auth_app():
         elif 'error'in data:auth_data.update({'error':data.get('error_description','Login failed'),'success':False})
         return"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Autenticação Concluída</title><style>body{display:flex;justify-content:center;align-items:center;height:100vh;margin:0;font-family:sans-serif;background:#121212;color:#eaeaea}.box{background:#1e1e1e;padding:40px;border-radius:16px;text-align:center}h1{color:#4cafef}p{color:#bbb}</style></head><body><div class="box"><h1>✅ Autenticação concluída</h1><p>Você pode fechar esta janela.</p></div><script>setTimeout(()=>window.close(),3000)</script></body></html>"""
     return app
-
 class ModDownloader:
     def __init__(self,d,cb=None):self.game_dir,self.progress_callback,self.download_stats,self.stats_lock=d,cb,{'total':0,'completed':0,'failed':0,'skipped':0},threading.Lock()
     def _update_progress(self):
@@ -167,28 +140,13 @@ class ModDownloader:
             p,fp=Path(f['path']),self.game_dir/Path(f['path'])
             fp.parent.mkdir(parents=True,exist_ok=True)
             h=f.get('hashes',{}).get('sha256')
-            
-            # Se o arquivo já existe e tem o hash correto, pula
             if fp.exists()and h and calc_sha256(fp)==h:
                 with self.stats_lock:self.download_stats['skipped']+=1
                 self._update_progress();return{'status':'skipped','file':str(p)}
-            
-            # Se o arquivo existe mas não tem hash ou está incorreto, tenta usar mesmo assim se não há internet
-            if fp.exists():
-                try:
-                    # Testa se há internet
-                    requests.get("https://www.google.com", timeout=3)
-                except:
-                    # Sem internet, usa arquivo existente
-                    print(f"Modo offline: usando arquivo existente {p}")
-                    with self.stats_lock:self.download_stats['skipped']+=1
-                    self._update_progress();return{'status':'skipped','file':str(p)}
-            
             downloads=f.get('downloads',[])
             if not downloads:
                 with self.stats_lock:self.download_stats['failed']+=1
                 self._update_progress();return{'status':'failed','file':str(p),'error':'No download URLs'}
-            
             for i,url in enumerate(downloads):
                 try:
                     r=requests.get(url,timeout=min(120,max(30,f.get('fileSize',1000000)//100000)),stream=True,headers={'User-Agent':'MinecraftBR-Launcher/1.0'})
@@ -245,10 +203,14 @@ class AuthThread(QThread):
             if auth_data['success']and MicrosoftAuthSession.check_token_id(auth_data['id_token'],self.email,nonce):
                 auth_session=MicrosoftAuthSession.authenticate(CONFIG['CLIENT_ID'],CONFIG['CLIENT_ID'],auth_data['code'],CONFIG['REDIRECT_URI'])
                 auth_session.email=self.email
+                
+                # Traz o foco de volta para o aplicativo após login bem-sucedido
                 try:
-                    if os.name == 'nt':
+                    if os.name == 'nt':  # Windows
                         import ctypes
                         from ctypes import wintypes
+                        
+                        # Encontra a janela do aplicativo
                         def enum_windows_proc(hwnd, lParam):
                             if ctypes.windll.user32.IsWindowVisible(hwnd):
                                 length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
@@ -262,20 +224,24 @@ class AuthThread(QThread):
                                         ctypes.windll.user32.BringWindowToTop(hwnd)
                                         return False
                             return True
+                        
                         EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
                         ctypes.windll.user32.EnumWindows(EnumWindowsProc(enum_windows_proc), 0)
-                    else:
+                    
+                    else:  # Linux/macOS
                         import subprocess
                         try:
+                            # Tenta usar wmctrl no Linux
                             subprocess.run(['wmctrl', '-a', CONFIG['Title']], check=True, capture_output=True)
                         except:
+                            # Fallback para xdotool
                             try:
                                 subprocess.run(['xdotool', 'search', '--name', CONFIG['Title'], 'windowactivate'], 
                                              check=True, capture_output=True)
                             except:
-                                pass
+                                pass  # Se não conseguir, ignora silenciosamente
                 except:
-                    pass
+                    pass  # Se der erro, ignora e continua normalmente
                 
                 self.auth_success.emit(auth_session,self.email)
             else:self.auth_error.emit("Falha na autenticação")
@@ -287,13 +253,17 @@ class MinecraftThread(QThread):
     def run(self):
         try:
             self.game_dir.mkdir(exist_ok=True)
+            
+            # Verifica se a instância já está pronta
             if self._is_instance_ready():
                 self.status_update.emit("Instância já configurada, iniciando...");self.progress_update.emit(50)
+                # Carrega o mrpack existente para obter informações
                 if not self._load_existing_mrpack():
                     self.error_occurred.emit("Erro ao carregar configuração existente");return
             else:
                 self.status_update.emit("Verificando modpack...");self.progress_update.emit(5)
                 if not self._sync_mrpack():self.error_occurred.emit("Erro ao sincronizar modpack");return
+            
             mc_ver,mod_info=self._get_minecraft_version_from_mrpack(),self._get_modloader_from_mrpack()
             if not mc_ver:self.error_occurred.emit("Versão do Minecraft não encontrada no modpack");return
             self.status_update.emit(f"Preparando {mc_ver} com {mod_info['name']}...");self.progress_update.emit(60)
@@ -316,17 +286,24 @@ class MinecraftThread(QThread):
             version_file=self.game_dir/"version.txt"
             mrpack_index=self.game_dir/"modrinth.index.json"
             instance_flag=self.game_dir/"instance_ready.flag"
+            
             if not (version_file.exists() and mrpack_index.exists() and instance_flag.exists()):
                 return False
+                
             with open(version_file,'r')as f:
                 current_version=f.read().strip()
+            
             with open(instance_flag,'r')as f:
                 flag_version=f.read().strip()
+            
             if current_version != CONFIG['VERSION_TAG'] or flag_version != CONFIG['VERSION_TAG']:
                 return False
+                
+            # Verifica se existem arquivos básicos do modpack
             mods_dir=self.game_dir/"mods"
             if not mods_dir.exists():
                 return False
+                
             print(f"Instância {CONFIG['VERSION_TAG']} já está pronta (incluindo overrides)")
             return True
         except Exception as e:
@@ -342,10 +319,8 @@ class MinecraftThread(QThread):
             return True
         except Exception as e:
             print(f"Erro ao carregar mrpack existente: {e}")
-            return False
-    
+            return False 
     def _apply_overrides(self,temp_dir):
-        """Aplica os arquivos de override do modpack"""
         try:
             overrides_dir=temp_dir/"overrides"
             client_overrides_dir=temp_dir/"client-overrides"
@@ -362,9 +337,7 @@ class MinecraftThread(QThread):
                 
         except Exception as e:
             print(f"Erro ao aplicar overrides: {e}")
-    
     def _copy_overrides(self,source_dir,target_dir):
-        """Copia recursivamente arquivos de override"""
         try:
             for item in source_dir.rglob('*'):
                 if item.is_file():
@@ -380,31 +353,10 @@ class MinecraftThread(QThread):
                     print(f"Override copiado: {relative_path}")
         except Exception as e:
             print(f"Erro ao copiar overrides: {e}")
-    
     def _sync_mrpack(self):
         try:
             mrpack_path=self.game_dir/"modpack.zip"
             version_file=self.game_dir/"version.txt"
-            
-            # Verifica se existe modpack local
-            if mrpack_path.exists():
-                try:
-                    with open(version_file,'r')as f:
-                        current_version=f.read().strip()
-                    print(f"Usando modpack local versão {current_version}")
-                    return self._extract_mrpack(mrpack_path)
-                except:
-                    pass
-            
-            # Tenta baixar se há internet
-            if not releases:  # Se não conseguiu obter releases online
-                if mrpack_path.exists():
-                    print("Modo offline: usando modpack existente")
-                    return self._extract_mrpack(mrpack_path)
-                else:
-                    raise Exception("Nenhum modpack encontrado e sem conexão com internet")
-            
-            # Download normal se há internet
             needs_download=True
             if mrpack_path.exists() and version_file.exists():
                 try:
@@ -415,32 +367,23 @@ class MinecraftThread(QThread):
                         print(f"Modpack já está na versão {CONFIG['VERSION_TAG']}")
                 except:
                     pass
-            
             if needs_download:
-                try:
-                    self.status_update.emit("Baixando modpack...");self.progress_update.emit(10)
-                    r=requests.get(CONFIG['MRPACK_URL'],stream=True,timeout=120);r.raise_for_status()
-                    total,downloaded=int(r.headers.get('content-length',0)),0
-                    with open(mrpack_path,'wb')as f:
-                        for chunk in r.iter_content(chunk_size=8192):
-                            if chunk:f.write(chunk);downloaded+=len(chunk)
-                            if total>0:self.progress_update.emit(10+int((downloaded/total)*20))
-                    
-                    with open(version_file,'w')as f:
-                        f.write(CONFIG['VERSION_TAG'])
-                    print(f"Modpack atualizado para versão {CONFIG['VERSION_TAG']}")
-                except Exception as e:
-                    if mrpack_path.exists():
-                        print(f"Erro no download, usando modpack local: {e}")
-                    else:
-                        raise Exception(f"Erro no download e nenhum modpack local encontrado: {e}")
-            
-            self.status_update.emit("Extraindo modpack...");self.progress_update.emit(35)
-            return self._extract_mrpack(mrpack_path)
-            
-        except Exception as e:
-            print(f"Erro na sincronização do mrpack: {e}")
-            return False
+                self.status_update.emit("Baixando modpack...");self.progress_update.emit(10)
+                r=requests.get(CONFIG['MRPACK_URL'],stream=True,timeout=120);r.raise_for_status()
+                total,downloaded=int(r.headers.get('content-length',0)),0
+                with open(mrpack_path,'wb')as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk:f.write(chunk);downloaded+=len(chunk)
+                        if total>0:self.progress_update.emit(10+int((downloaded/total)*20))
+                with open(version_file,'w')as f:
+                    f.write(CONFIG['VERSION_TAG'])
+                print(f"Modpack atualizado para versão {CONFIG['VERSION_TAG']}")
+                
+                self.status_update.emit("Extraindo modpack...");self.progress_update.emit(35)
+                return self._extract_mrpack(mrpack_path)
+            else:
+                return self._load_existing_mrpack()
+        except Exception as e:print(f"Erro na sincronização do mrpack: {e}");return False
     def _extract_mrpack(self,p):
         try:
             temp_dir=self.game_dir/"temp_mrpack"
@@ -449,27 +392,19 @@ class MinecraftThread(QThread):
             with zipfile.ZipFile(p,'r')as z:z.extractall(temp_dir)
             index_path=temp_dir/"modrinth.index.json"
             if not index_path.exists():raise Exception("modrinth.index.json não encontrado no modpack")
-            
-            # Copia o index para o diretório principal para reutilização
             with open(index_path,'r',encoding='utf-8')as f:
                 self.mrpack_data=json.load(f)
             with open(self.game_dir/"modrinth.index.json",'w',encoding='utf-8')as f:
                 json.dump(self.mrpack_data,f,indent=2)
-            
-            # Aplica overrides do modpack
             self.status_update.emit("Aplicando configurações...");self.progress_update.emit(38)
             self._apply_overrides(temp_dir)
-            
             files=self.mrpack_data.get('files',[])
             mods_dir=self.game_dir/"mods";mods_dir.mkdir(exist_ok=True);self.status_update.emit("Baixando mods (paralelo)...");self.progress_update.emit(40)
             downloader=ModDownloader(self.game_dir,self.progress_update.emit)
             result=downloader.download_mods_parallel(files)
             if not result['success']and len(result['failed_downloads'])>len(files)*0.1:raise Exception(f"Muitas falhas no download: {len(result['failed_downloads'])} arquivos")
-            
-            # Marca a instância como completa
             with open(self.game_dir/"instance_ready.flag",'w')as f:
                 f.write(CONFIG['VERSION_TAG'])
-            
             return True
         except Exception as e:print(f"Erro na extração do mrpack: {e}");return False
         except Exception as e:print(f"Erro ao limpar mods antigos: {e}")
@@ -493,13 +428,10 @@ class MinecraftLauncher(QMainWindow):
         self.game_dir = CONFIG['GameDir']
         self.game_dir.mkdir(parents=True, exist_ok=True)
         self.auth_session, self.username, self.last_login_data = None, None, load_login_data(self.base_dir)
-        
-        # ADICIONE ESTA LINHA: Tenta restaurar sessão Microsoft automaticamente na inicialização
         if self.last_login_data and self.last_login_data.get('type') == 'microsoft':
             self.auth_session = try_restore_microsoft_session(self.last_login_data)
             if self.auth_session:
                 self.username = self.last_login_data['data'].get('username', 'Usuário')
-        
         self.auth_thread, self.minecraft_thread, self._pending_auth_email = None, None, None
         self.progress_timer, self.current_progress = QTimer(), 0
         self.init_ui()
@@ -594,12 +526,10 @@ class MinecraftLauncher(QMainWindow):
         if t == 'microsoft':
             e, u = d.get('email', ''), d.get('username', 'Usuário')
             if e:
-                # Tenta restaurar a sessão automaticamente
                 restored_session = try_restore_microsoft_session(self.last_login_data)
                 if restored_session:
                     self.auth_session = restored_session
                     self.username = u
-                    # Garante que user_type está definido
                     if not hasattr(restored_session, 'user_type'):
                         restored_session.user_type = 'msa'
                     self.user_display.setText(f"Microsoft: {u} (Conectado)")
@@ -640,12 +570,9 @@ class MinecraftLauncher(QMainWindow):
         self.user_display.setText(f"{username} ({email})")
         self.user_display.setStyleSheet(self.user_display.styleSheet() + "color:#FFFFFF;")
         self.status_label.setText(f"Autenticado como {username}. Iniciando jogo...")
-        
-        # MODIFICAÇÃO: Agora salva também os tokens da sessão
         save_login_data(self.base_dir, 'microsoft', 
                     {'email': email, 'username': username}, 
                     auth_session)
-        
         self.update_play_button_progress(10, "PREPARANDO...")
         self.minecraft_thread = MinecraftThread(self.game_dir, self.auth_session, self.username)
         self.minecraft_thread.status_update.connect(self.status_label.setText)
@@ -659,10 +586,7 @@ class MinecraftLauncher(QMainWindow):
         if not selected_button:
             QMessageBox.warning(self, "Aviso", "Selecione um tipo de login primeiro!")
             return
-        
         button_id = self.login_group.id(selected_button)
-        
-        # MODIFICAÇÃO: Verifica se já tem sessão Microsoft ativa
         if ((button_id == 0 and self.last_login_data and self.last_login_data['type'] == 'microsoft') or (button_id == 1)):
             if not self.auth_session:
                 email = self.last_login_data['data'].get('email', '') if button_id == 0 else getattr(self, '_pending_auth_email', '')
@@ -674,12 +598,9 @@ class MinecraftLauncher(QMainWindow):
                 self.update_play_button_progress(5, "AUTENTICANDO...")
                 self._start_auth(email)
                 return
-            # Se chegou aqui, já tem auth_session válida, pode prosseguir
-        
         if not self.auth_session and not self.username:
             QMessageBox.warning(self, "Aviso", "Configuração de login inválida!")
             return
-        
         self.play_btn.setEnabled(False)
         self.update_play_button_progress(5, "INICIANDO...")
         self.minecraft_thread = MinecraftThread(self.game_dir, self.auth_session, self.username)
@@ -709,7 +630,6 @@ class MinecraftLauncher(QMainWindow):
                 QMessageBox.information(self,"Sucesso","Atalho criado na área de trabalho!")
             except Exception as e:QMessageBox.critical(self,"Erro",f"Erro ao criar atalho: {e}")
     def on_about(self):QMessageBox.about(self,"Sobre",f"{CONFIG['Title']}\n\n🎮 Launcher personalizado para Minecraft\n📦 Sistema de modpacks .mrpack\n💾 RAM otimizada: {CONFIG['RAM_SIZE']}\n\nDesenvolvido para a comunidade MinecraftBR")
-
 class AutoUpdater:
     def __init__(self):self.github_api_url,self.current_exe_path,self.is_windows="https://api.github.com/repos/Comquister/MinecraftBR-Launcher/releases/latest",Path(sys.argv[0]).resolve(),platform.system()=="Windows"
     def calculate_exe_hash(self,file_path):
@@ -763,13 +683,7 @@ class AutoUpdater:
             elif result==QMessageBox.StandardButton.No:return True
             else:sys.exit(0)
         except Exception as e:print(f"Erro no sistema de atualização: {e}");return True
-
-def check_for_updates():
-    try:
-        return AutoUpdater().check_and_update()
-    except:
-        print("Modo offline: pulando verificação de atualizações")
-        return True
+def check_for_updates():return AutoUpdater().check_and_update()
 def main():
     if not sys.argv[0].endswith(".py")and not check_for_updates():sys.exit(1)
     app=QApplication(sys.argv);app.setApplicationName("MinecraftBr");launcher=MinecraftLauncher();launcher.show();sys.exit(app.exec())
