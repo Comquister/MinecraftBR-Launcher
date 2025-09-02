@@ -245,14 +245,10 @@ class AuthThread(QThread):
             if auth_data['success']and MicrosoftAuthSession.check_token_id(auth_data['id_token'],self.email,nonce):
                 auth_session=MicrosoftAuthSession.authenticate(CONFIG['CLIENT_ID'],CONFIG['CLIENT_ID'],auth_data['code'],CONFIG['REDIRECT_URI'])
                 auth_session.email=self.email
-                
-                # Traz o foco de volta para o aplicativo após login bem-sucedido
                 try:
-                    if os.name == 'nt':  # Windows
+                    if os.name == 'nt':
                         import ctypes
                         from ctypes import wintypes
-                        
-                        # Encontra a janela do aplicativo
                         def enum_windows_proc(hwnd, lParam):
                             if ctypes.windll.user32.IsWindowVisible(hwnd):
                                 length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
@@ -266,24 +262,20 @@ class AuthThread(QThread):
                                         ctypes.windll.user32.BringWindowToTop(hwnd)
                                         return False
                             return True
-                        
                         EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
                         ctypes.windll.user32.EnumWindows(EnumWindowsProc(enum_windows_proc), 0)
-                    
-                    else:  # Linux/macOS
+                    else:
                         import subprocess
                         try:
-                            # Tenta usar wmctrl no Linux
                             subprocess.run(['wmctrl', '-a', CONFIG['Title']], check=True, capture_output=True)
                         except:
-                            # Fallback para xdotool
                             try:
                                 subprocess.run(['xdotool', 'search', '--name', CONFIG['Title'], 'windowactivate'], 
                                              check=True, capture_output=True)
                             except:
-                                pass  # Se não conseguir, ignora silenciosamente
+                                pass
                 except:
-                    pass  # Se der erro, ignora e continua normalmente
+                    pass
                 
                 self.auth_success.emit(auth_session,self.email)
             else:self.auth_error.emit("Falha na autenticação")
