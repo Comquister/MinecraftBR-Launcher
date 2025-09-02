@@ -295,17 +295,13 @@ class MinecraftThread(QThread):
     def run(self):
         try:
             self.game_dir.mkdir(exist_ok=True)
-            
-            # Verifica se a instância já está pronta
             if self._is_instance_ready():
                 self.status_update.emit("Instância já configurada, iniciando...");self.progress_update.emit(50)
-                # Carrega o mrpack existente para obter informações
                 if not self._load_existing_mrpack():
                     self.error_occurred.emit("Erro ao carregar configuração existente");return
             else:
                 self.status_update.emit("Verificando modpack...");self.progress_update.emit(5)
                 if not self._sync_mrpack():self.error_occurred.emit("Erro ao sincronizar modpack");return
-            
             mc_ver,mod_info=self._get_minecraft_version_from_mrpack(),self._get_modloader_from_mrpack()
             if not mc_ver:self.error_occurred.emit("Versão do Minecraft não encontrada no modpack");return
             self.status_update.emit(f"Preparando {mc_ver} com {mod_info['name']}...");self.progress_update.emit(60)
@@ -317,46 +313,34 @@ class MinecraftThread(QThread):
             else:version.set_auth_offline(self.username,None)
             self.status_update.emit("Instalando componentes...");self.progress_update.emit(75)
             env=version.install();self.status_update.emit("Configurando JVM...")
-            is_64bit,ram_mb=platform.machine().endswith('64'),int(CONFIG['RAM_SIZE'].replace('M',''))
-            if not is_64bit and ram_mb>3072:ram_mb=3072;self.status_update.emit("Sistema 32-bit detectado, limitando RAM a 3GB...")
-            jvm_args=[f"-Xmx{ram_mb}M",f"-Xms{min(512,ram_mb)}M","-XX:+UseG1GC","-XX:+UnlockExperimentalVMOptions","-XX:G1NewSizePercent=20","-XX:G1ReservePercent=20","-XX:MaxGCPauseMillis=50","-XX:G1HeapRegionSize=32M","-Djava.awt.headless=false","-Dfile.encoding=UTF-8"]
+            jvm_args=[f"-Xmx{CONFIG['RAM_SIZE']}",f"-Xms{CONFIG['RAM_SIZE']}","-XX:+UseG1GC","-XX:+UnlockExperimentalVMOptions","-XX:G1NewSizePercent=20","-XX:G1ReservePercent=20","-XX:MaxGCPauseMillis=50","-XX:G1HeapRegionSize=32M","-Djava.awt.headless=false","-Dfile.encoding=UTF-8"]
             if os.name=='nt':jvm_args.extend(["-Dos.name=Windows 10","-Dos.version=10.0"])
             orig=env.jvm_args.copy()
             env.jvm_args=[orig[0]if orig else"java"]+jvm_args+[a for a in orig[1:]if not any(a.startswith(p)for p in['-Xmx','-Xms','-XX:+UseG1GC'])]
             self.status_update.emit("Iniciando jogo...");self.progress_update.emit(100);self.finished_success.emit();env.run()
         except Exception as e:import traceback;print(f"Erro: {str(e)}\nDetalhes: {traceback.format_exc()}");self.error_occurred.emit(str(e))
     def _is_instance_ready(self):
-        """Verifica se a instância já está completamente configurada para esta versão"""
         try:
             version_file=self.game_dir/"version.txt"
             mrpack_index=self.game_dir/"modrinth.index.json"
             instance_flag=self.game_dir/"instance_ready.flag"
-            
             if not (version_file.exists() and mrpack_index.exists() and instance_flag.exists()):
                 return False
-                
             with open(version_file,'r')as f:
                 current_version=f.read().strip()
-            
             with open(instance_flag,'r')as f:
                 flag_version=f.read().strip()
-            
             if current_version != CONFIG['VERSION_TAG'] or flag_version != CONFIG['VERSION_TAG']:
                 return False
-                
-            # Verifica se existem arquivos básicos do modpack
             mods_dir=self.game_dir/"mods"
             if not mods_dir.exists():
                 return False
-                
             print(f"Instância {CONFIG['VERSION_TAG']} já está pronta (incluindo overrides)")
             return True
         except Exception as e:
             print(f"Erro ao verificar instância: {e}")
             return False
-    
     def _load_existing_mrpack(self):
-        """Carrega as informações do mrpack já extraído"""
         try:
             index_path=self.game_dir/"modrinth.index.json"
             if not index_path.exists():
