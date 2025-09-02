@@ -36,7 +36,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: python -m pip install --upgrade pip && pip install pyinstaller psutil requests flask PyQt6 portablemc
+      - run: python -m pip install --upgrade pip && pip install pyinstaller psutil requests flask PyQt6 portablemc[certifi]
       - run: pyinstaller --noconfirm --onefile --windowed --icon "image/favicon.ico" --name "MinecraftBr" minecraft.py
       - uses: actions/upload-artifact@v4
         with:
