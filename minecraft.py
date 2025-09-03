@@ -17,7 +17,7 @@ from portablemc.forge import ForgeVersion,_NeoForgeVersion
 from portablemc.auth import MicrosoftAuthSession
 from flask import Flask,request
 
-def calc_ram():return max(1024,int(min(max(1,psutil.virtual_memory().total/(1024**3)-2)*0.7,12)*1024))
+def calc_ram():return max(1024,int(min(max(1,psutil.virtual_memory().total/(1024**3)-2)*0.7,8)*1024))
 def calc_sha256(f):
     h=hashlib.sha256()
     try:
