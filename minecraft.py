@@ -11,9 +11,8 @@ from pathlib import Path
 from PyQt6.QtWidgets import *
 from PyQt6.QtCore import Qt,QThread,pyqtSignal,QTimer
 from PyQt6.QtGui import QPixmap,QPalette,QBrush,QIcon
-from portablemc.standard import Version,Context
+from portablemc.standard import Context
 from portablemc.fabric import FabricVersion
-from portablemc.forge import ForgeVersion,_NeoForgeVersion
 from portablemc.auth import MicrosoftAuthSession
 from flask import Flask,request
 
@@ -267,10 +266,7 @@ class MinecraftThread(QThread):
             mc_ver,mod_info=self._get_minecraft_version_from_mrpack(),self._get_modloader_from_mrpack()
             if not mc_ver:self.error_occurred.emit("Versão do Minecraft não encontrada no modpack");return
             self.status_update.emit(f"Preparando {mc_ver} com {mod_info['name']}...");self.progress_update.emit(60)
-            if mod_info['name']=='fabric-loader':version=FabricVersion.with_fabric(mc_ver,mod_info['version'],context=self.context)
-            elif mod_info['name']=='forge':version=ForgeVersion(f"{mc_ver}-{mod_info['version']}",context=self.context)
-            elif mod_info['name']=='neoforge':version=_NeoForgeVersion(mod_info['version'],context=self.context)
-            else:version=Version(mc_ver,context=self.context)
+            version=FabricVersion.with_fabric(mc_ver,mod_info['version'],context=self.context)
             if self.auth_session:version.auth_session=self.auth_session
             else:version.set_auth_offline(self.username,None)
             self.status_update.emit("Instalando componentes...");self.progress_update.emit(75)
@@ -442,7 +438,7 @@ class MinecraftLauncher(QMainWindow):
             r=requests.get("https://raw.githubusercontent.com/Comquister/MinecraftBR-Launcher/refs/heads/main/image/favicon.ico",timeout=10)
             if r.status_code==200:p=QPixmap();p.loadFromData(r.content);self.setWindowIcon(QIcon(p))
         except:pass
-        self.setGeometry(100,100,450,680)
+        self.setGeometry(100,100,1280,768)
         self.setStyleSheet("""QWidget{color:#FFFFFF;font-family:'Segoe UI',Arial,sans-serif}
                            QLabel{color:#FFFFFF}
                            QRadioButton{color:#FFFFFF;font-size:14px;padding:8px;spacing:10px}
